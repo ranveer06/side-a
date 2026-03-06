@@ -1,30 +1,43 @@
 {
   "expo": {
-    "name": "SideA",
-    "slug": "SideA",
+    "name": "Side A",
+    "slug": "side-a",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "userInterfaceStyle": "dark",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#000000"
     },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "bundleIdentifier": "com.ronny.sidea",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Side A needs access to your photos to upload profile pictures.",
+        "NSCameraUsageDescription": "Side A needs access to your camera to take profile pictures.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      },
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Side A needs access to your photos to upload profile pictures.",
+          "cameraPermission": "Side A needs access to your camera to take profile pictures."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e2fc1dec-5019-4167-bf26-59e2a84d3715"
+      }
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    }
+    "owner": "ranveer06"
   }
 }
