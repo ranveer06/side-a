@@ -29,6 +29,7 @@ interface FeedItem {
   likes_count: number;
   comments_count: number;
   is_liked?: boolean;
+  is_relisten?: boolean;
 }
 
 interface TopReviewedAlbum {
@@ -68,18 +69,7 @@ export default function HomeScreen({ navigation }: any) {
 
       setCurrentUserId(user.id);
 
-      let followingIds = new Set<string>();
-      try {
-        const { data: followingData } = await supabase
-          .from('follows')
-          .select('following_id')
-          .eq('follower_id', user.id);
-        followingIds = new Set(followingData?.map((f: { following_id: string }) => f.following_id) || []);
-      } catch (_) {
-        // follows table may not exist or RLS may block
-      }
-
-      // Get ALL logs from everyone (public feed)
+      // Get all logs, most recent first (public activity feed)
       const { data: logs, error: logsError } = await supabase
         .from('album_logs')
         .select('*')
@@ -167,9 +157,18 @@ export default function HomeScreen({ navigation }: any) {
       }
       setTopReviewed(topReviewedData);
 
+      const sameUserAlbumOrder = (userId: string, albumId: string) => {
+        const same = logs
+          .filter((l: any) => l.user_id === userId && l.album_id === albumId)
+          .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        return same;
+      };
+
       const feedItems: FeedItem[] = logs.map(log => {
         const profile = profilesMap.get(log.user_id);
         const album = albumsMap.get(log.album_id);
+        const sameUserLogs = sameUserAlbumOrder(log.user_id, log.album_id);
+        const isRelisten = sameUserLogs.length > 1 && sameUserLogs[0].id !== log.id;
 
         return {
           log_id: log.id,
@@ -187,23 +186,12 @@ export default function HomeScreen({ navigation }: any) {
           likes_count: likeCounts[log.id] ?? 0,
           comments_count: commentCounts[log.id] ?? 0,
           is_liked: likedSet.has(log.id),
+          is_relisten: isRelisten,
         };
       });
 
-      // Sort: Following first, then everyone else (both by date)
-      const sortedFeed = feedItems.sort((a, b) => {
-        const aIsFollowing = followingIds.has(a.user_id);
-        const bIsFollowing = followingIds.has(b.user_id);
-        
-        // If one is following and one isn't, following comes first
-        if (aIsFollowing && !bIsFollowing) return -1;
-        if (!aIsFollowing && bIsFollowing) return 1;
-        
-        // If both are same category, sort by date (already sorted from query)
-        return 0;
-      });
-
-      setFeed(sortedFeed);
+      // Keep strict chronological order: most recent public activity first
+      setFeed(feedItems);
     } catch (error) {
       console.error('Error loading feed:', error);
     } finally {
@@ -276,9 +264,17 @@ export default function HomeScreen({ navigation }: any) {
               )}
             </View>
             <View style={styles.headerText}>
-              <Text style={styles.username}>
-                {isOwnLog ? 'You' : `@${item.username}`}
-              </Text>
+              <View style={styles.headerTitleRow}>
+                <Text style={styles.username}>
+                  {isOwnLog ? 'You' : `@${item.username}`}
+                </Text>
+                {item.is_relisten && (
+                  <View style={styles.relistenBadge}>
+                    <Ionicons name="repeat" size={10} color="#1DB954" />
+                    <Text style={styles.relistenText}>Relisten</Text>
+                  </View>
+                )}
+              </View>
               <Text style={styles.action}>logged an album</Text>
             </View>
           </TouchableOpacity>
@@ -505,6 +501,25 @@ const styles = StyleSheet.create({
   headerText: {
     flex: 1,
     marginLeft: 12,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  relistenBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(29, 185, 84, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  relistenText: {
+    fontSize: 10,
+    color: '#1DB954',
+    fontWeight: '600',
   },
   username: {
     fontSize: 15,

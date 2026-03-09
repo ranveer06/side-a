@@ -9,18 +9,24 @@ const API_BASE = 'https://api.spotify.com/v1';
 let cachedToken: string | null = null;
 let tokenExpiry = 0;
 
+/** Standard Base64 encode for ASCII string (client_id:client_secret) */
 function base64Encode(str: string): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-  let output = '';
-  for (let i = 0; i < str.length; i += 3) {
-    const a = str.charCodeAt(i);
-    const b = str.charCodeAt(i + 1);
-    const c = str.charCodeAt(i + 2);
-    const n = (a << 16) | ((b || 0) << 8) | (c || 0);
-    output += chars[(n >> 18) & 63] + chars[(n >> 12) & 63] + chars[(n >> 6) & 63] + chars[n & 63];
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let out = '';
+  let i = 0;
+  const len = str.length;
+  while (i + 2 < len) {
+    const n = (str.charCodeAt(i) << 16) | (str.charCodeAt(i + 1) << 8) | str.charCodeAt(i + 2);
+    out += chars[(n >> 18) & 63] + chars[(n >> 12) & 63] + chars[(n >> 6) & 63] + chars[n & 63];
+    i += 3;
   }
-  const padding = str.length % 3;
-  return padding ? output.slice(0, -(3 - padding)) : output;
+  if (i < len) {
+    let n = str.charCodeAt(i) << 16;
+    if (i + 1 < len) n |= str.charCodeAt(i + 1) << 8;
+    out += chars[(n >> 18) & 63] + chars[(n >> 12) & 63];
+    out += i + 1 < len ? chars[(n >> 6) & 63] + '=' : '==';
+  }
+  return out;
 }
 
 async function getAccessToken(): Promise<string> {
@@ -30,20 +36,35 @@ async function getAccessToken(): Promise<string> {
 
   const credentials = base64Encode(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`);
 
-  const { data } = await axios.post<{ access_token: string; expires_in: number }>(
-    TOKEN_URL,
-    'grant_type=client_credentials',
-    {
+  try {
+    const response = await fetch(TOKEN_URL, {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         Authorization: `Basic ${credentials}`,
       },
-    }
-  );
+      body: 'grant_type=client_credentials',
+    });
 
-  cachedToken = data.access_token;
-  tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
-  return cachedToken;
+    const data = await response.json();
+
+    if (!response.ok) {
+      const msg = data?.error_description ?? data?.error ?? response.statusText;
+      console.error('Spotify token error:', response.status, msg);
+      cachedToken = null;
+      tokenExpiry = 0;
+      throw new Error(msg || `Token request failed: ${response.status}`);
+    }
+
+    cachedToken = data.access_token;
+    tokenExpiry = Date.now() + ((data.expires_in || 3600) - 60) * 1000;
+    return cachedToken;
+  } catch (err: any) {
+    cachedToken = null;
+    tokenExpiry = 0;
+    if (err?.message) console.error('Spotify token error:', err.message);
+    throw err;
+  }
 }
 
 export interface SpotifySearchResult {
@@ -87,13 +108,15 @@ export const spotifyService = {
    * Search for albums by query string
    */
   searchAlbums: async (query: string, limit = 20): Promise<SpotifySearchResult[]> => {
+    const q = (query || '').trim();
+    if (!q) return [];
     try {
       const token = await getAccessToken();
       const response = await axios.get(`${API_BASE}/search`, {
         params: {
-          q: query,
+          q: q,
           type: 'album',
-          limit: Math.min(limit, 50),
+          limit: Math.min(Math.max(1, limit), 10),
         },
         headers: {
           Authorization: `Bearer ${token}`,
@@ -102,8 +125,9 @@ export const spotifyService = {
 
       const items = response.data?.albums?.items ?? [];
       return items.map(albumToSearchResult);
-    } catch (error) {
-      console.error('Spotify search error:', error);
+    } catch (error: any) {
+      const msg = error.response?.data?.error_description ?? error.response?.data?.error ?? error.message;
+      console.error('Spotify search error:', msg, error.response?.status);
       return [];
     }
   },
@@ -112,13 +136,15 @@ export const spotifyService = {
    * Search for artists by query string
    */
   searchArtists: async (query: string, limit = 20): Promise<SpotifyArtistResult[]> => {
+    const q = (query || '').trim();
+    if (!q) return [];
     try {
       const token = await getAccessToken();
       const response = await axios.get(`${API_BASE}/search`, {
         params: {
-          q: query,
+          q: q,
           type: 'artist',
-          limit: Math.min(limit, 50),
+          limit: Math.min(Math.max(1, limit), 10),
         },
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -128,8 +154,9 @@ export const spotifyService = {
         name: a.name,
         imageUrl: a.images?.[0]?.url,
       }));
-    } catch (error) {
-      console.error('Spotify artist search error:', error);
+    } catch (error: any) {
+      const msg = error.response?.data?.error_description ?? error.response?.data?.error ?? error.message;
+      console.error('Spotify artist search error:', msg, error.response?.status);
       return [];
     }
   },

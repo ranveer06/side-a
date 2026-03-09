@@ -55,8 +55,8 @@ export default function LogModalScreen({ route, navigation }: any) {
       return;
     }
 
-    if (rating === 0) {
-      Alert.alert('Rating Required', 'Please select a rating');
+    if (!rating || rating < 0.5) {
+      Alert.alert('Rating Required', 'Please select a rating (tap or drag the stars)');
       return;
     }
 
@@ -97,20 +97,34 @@ export default function LogModalScreen({ route, navigation }: any) {
   const renderStarSelector = () => {
     return (
       <View style={styles.starSelector}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <TouchableOpacity
-            key={star}
-            onPress={() => setRating(star)}
-            style={styles.starButton}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name={star <= rating ? 'star' : 'star-outline'}
-              size={44}
-              color={star <= rating ? '#FFD700' : '#666'}
-            />
-          </TouchableOpacity>
-        ))}
+        {[1, 2, 3, 4, 5].map((star) => {
+          const full = rating >= star;
+          const half = rating >= star - 0.5 && rating < star;
+          const name = full ? 'star' : half ? 'star-half' : 'star-outline';
+          const leftValue = star - 0.5;
+          const rightValue = star;
+          return (
+            <View key={star} style={styles.starButton}>
+              <TouchableOpacity
+                style={styles.starHalfTouch}
+                activeOpacity={0.7}
+                onPress={() => setRating(leftValue)}
+              />
+              <View style={styles.starIconWrap} pointerEvents="none">
+                <Ionicons
+                  name={name}
+                  size={44}
+                  color={full || half ? '#FFD700' : '#666'}
+                />
+              </View>
+              <TouchableOpacity
+                style={styles.starHalfTouch}
+                activeOpacity={0.7}
+                onPress={() => setRating(rightValue)}
+              />
+            </View>
+          );
+        })}
       </View>
     );
   };
@@ -158,7 +172,7 @@ export default function LogModalScreen({ route, navigation }: any) {
       <View style={styles.section}>
         <Text style={styles.sectionLabel}>Rating *</Text>
         {renderStarSelector()}
-        {rating > 0 && (
+        {rating >= 0.5 && (
           <Text style={styles.ratingText}>{rating} / 5 stars</Text>
         )}
       </View>
@@ -304,11 +318,25 @@ const styles = StyleSheet.create({
   starSelector: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 4,
     marginVertical: 12,
   },
   starButton: {
-    padding: 8,
+    width: 48,
+    height: 52,
+    flexDirection: 'row',
+  },
+  starHalfTouch: {
+    flex: 1,
+    height: '100%',
+  },
+  starIconWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   ratingText: {
     textAlign: 'center',

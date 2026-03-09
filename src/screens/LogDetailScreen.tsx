@@ -12,9 +12,10 @@ import {
   Platform,
   ActivityIndicator,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, logCommentService, logLikeService, type LogComment } from '../services/supabase';
+import { supabase, logCommentService, logLikeService, albumLogService, type LogComment } from '../services/supabase';
 
 interface CommentWithProfile extends LogComment {
   username?: string;
@@ -45,10 +46,14 @@ export default function LogDetailScreen({ route, navigation }: any) {
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
   const [likeBusy, setLikeBusy] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   const loadLogAndComments = useCallback(async () => {
     if (!logId) return;
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      setCurrentUserId(user?.id ?? null);
+
       const { data: log, error: logError } = await supabase
         .from('album_logs')
         .select('id, user_id, album_id, rating, review_text, listened_date')
@@ -111,13 +116,44 @@ export default function LogDetailScreen({ route, navigation }: any) {
     loadLogAndComments();
   }, [loadLogAndComments]);
 
+  const handleDeleteLog = () => {
+    Alert.alert(
+      'Delete review',
+      'Are you sure you want to delete this review? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await albumLogService.deleteLog(logId);
+              if (navigation.canGoBack()) navigation.goBack();
+              else navigation.navigate('Home');
+            } catch (e: any) {
+              Alert.alert('Error', e.message || 'Could not delete');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   useEffect(() => {
+    const isOwnLog = logData && currentUserId === logData.user_id;
     navigation.setOptions({
       title: 'Review',
       headerStyle: { backgroundColor: '#000' },
       headerTintColor: '#fff',
+      headerRight: isOwnLog
+        ? () => (
+            <TouchableOpacity onPress={handleDeleteLog} style={{ marginRight: 16 }}>
+              <Ionicons name="trash-outline" size={22} color="#e74c3c" />
+            </TouchableOpacity>
+          )
+        : undefined,
     });
-  }, [navigation]);
+  }, [navigation, logData, currentUserId]);
 
   const handlePostComment = async () => {
     const trimmed = commentText.trim();

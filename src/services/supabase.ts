@@ -221,6 +221,17 @@ export const albumLogService = {
     
     if (error) throw error;
   },
+
+  /** All public logs for an album (for community reviews), newest first */
+  getLogsForAlbum: async (albumId: string) => {
+    const { data, error } = await supabase
+      .from('album_logs')
+      .select('id, user_id, album_id, rating, review_text, listened_date, created_at')
+      .eq('album_id', albumId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data ?? [];
+  },
 };
 
 export const collectionService = {
@@ -310,6 +321,53 @@ export const listService = {
     
     if (error) throw error;
     return data;
+  },
+};
+
+export const listenListService = {
+  getListenList: async (userId: string) => {
+    const { data, error } = await supabase
+      .from('listen_list')
+      .select(`
+        id,
+        album_id,
+        created_at,
+        albums (*)
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data ?? [];
+  },
+  addToListenList: async (userId: string, albumId: string) => {
+    const { error } = await supabase
+      .from('listen_list')
+      .insert({ user_id: userId, album_id: albumId });
+    if (error) {
+      if ((error as any).code === '23505') return; // unique violation = already in list
+      throw error;
+    }
+  },
+  removeFromListenList: async (id: string) => {
+    const { error } = await supabase.from('listen_list').delete().eq('id', id);
+    if (error) throw error;
+  },
+  removeFromListenListByAlbum: async (userId: string, albumId: string) => {
+    const { error } = await supabase
+      .from('listen_list')
+      .delete()
+      .eq('user_id', userId)
+      .eq('album_id', albumId);
+    if (error) throw error;
+  },
+  isInListenList: async (userId: string, albumId: string): Promise<boolean> => {
+    const { data } = await supabase
+      .from('listen_list')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('album_id', albumId)
+      .maybeSingle();
+    return !!data;
   },
 };
 

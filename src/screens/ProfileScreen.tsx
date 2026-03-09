@@ -12,17 +12,22 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, albumLogService, profileService, authService, socialService } from '../services/supabase';
+import { supabase, albumLogService, profileService, authService, socialService, listService, listenListService } from '../services/supabase';
+
+type ProfileTab = 'Profile' | 'Diary' | 'Lists' | 'ListenList';
 
 export default function ProfileScreen({ route, navigation }: any) {
   // Check if viewing another user's profile
   const viewingUserId = route?.params?.userId;
   const isOwnProfile = !viewingUserId;
 
+  const [activeTab, setActiveTab] = useState<ProfileTab>('Profile');
   const [profile, setProfile] = useState<any>(null);
   const [favorites, setFavorites] = useState<any[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
   const [collection, setCollection] = useState<any[]>([]);
+  const [userLists, setUserLists] = useState<any[]>([]);
+  const [listenList, setListenList] = useState<any[]>([]);
   const [stats, setStats] = useState({
     totalLogs: 0,
     avgRating: 0,
@@ -138,6 +143,30 @@ export default function ProfileScreen({ route, navigation }: any) {
         followingCount: followingCount || 0,
         followersCount: followersCount || 0,
       });
+
+      if (profileUserId === user?.id) {
+        try {
+          const listsData = await listService.getUserLists(profileUserId);
+          const listsWithCounts = await Promise.all(
+            (listsData || []).map(async (list: any) => {
+              const { count } = await supabase
+                .from('list_items')
+                .select('*', { count: 'exact', head: true })
+                .eq('list_id', list.id);
+              return { ...list, item_count: count || 0 };
+            })
+          );
+          setUserLists(listsWithCounts);
+        } catch (e) {
+          console.warn('Lists load failed:', e);
+        }
+        try {
+          const listenData = await listenListService.getListenList(profileUserId);
+          setListenList(listenData);
+        } catch (e) {
+          console.warn('Listen list load failed:', e);
+        }
+      }
     } catch (error) {
       console.error('Error loading profile:', error);
     } finally {
@@ -376,6 +405,26 @@ export default function ProfileScreen({ route, navigation }: any) {
         )}
       </View>
 
+      {/* Toggle bar - only for own profile */}
+      {isOwnProfile && (
+        <View style={styles.toggleBar}>
+          {(['Profile', 'Diary', 'Lists', 'ListenList'] as const).map((tab) => (
+            <TouchableOpacity
+              key={tab}
+              style={[styles.toggleTab, activeTab === tab && styles.toggleTabActive]}
+              onPress={() => setActiveTab(tab)}
+            >
+              <Text style={[styles.toggleTabText, activeTab === tab && styles.toggleTabTextActive]}>
+                {tab === 'ListenList' ? 'Listen' : tab}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* Tab content - only when own profile */}
+      {isOwnProfile && activeTab === 'Profile' && (
+        <>
       {/* Stats */}
       <View style={styles.statsSection}>
         <View style={styles.statItem}>
@@ -483,7 +532,7 @@ export default function ProfileScreen({ route, navigation }: any) {
         </View>
       )}
 
-      {/* Recent Logs */}
+      {/* Recent Logs - only in Profile tab */}
       <View style={styles.logsSection}>
         <Text style={styles.sectionTitle}>Recent Logs</Text>
         {logs.length === 0 ? (
@@ -501,15 +550,229 @@ export default function ProfileScreen({ route, navigation }: any) {
           </View>
         ) : (
           <>
-            {logs.slice(0, 10).map(renderLogItem)}
-            {logs.length > 10 && (
-              <Text style={styles.moreText}>
-                + {logs.length - 10} more logs
-              </Text>
+            {logs.slice(0, 5).map(renderLogItem)}
+            {logs.length > 5 && (
+              <TouchableOpacity onPress={() => setActiveTab('Diary')}>
+                <Text style={styles.moreText}>View all in Diary →</Text>
+              </TouchableOpacity>
             )}
           </>
         )}
       </View>
+        </>
+      )}
+
+      {isOwnProfile && activeTab === 'Diary' && (
+        <View style={styles.diarySection}>
+          <Text style={styles.sectionTitle}>Diary</Text>
+          <Text style={styles.sectionSubtext}>All your reviews</Text>
+          {logs.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="journal-outline" size={48} color="#666" />
+              <Text style={styles.emptyText}>No reviews yet</Text>
+              <TouchableOpacity
+                style={styles.startButton}
+                onPress={() => navigation.navigate('Search')}
+              >
+                <Text style={styles.startButtonText}>Log an album</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            logs.map((log) => {
+              const sameAlbumLogs = logs
+                .filter((l: any) => l.album_id === log.album_id)
+                .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+              const isRelisten = sameAlbumLogs.length > 1 && sameAlbumLogs[0].id !== log.id;
+              return (
+                <TouchableOpacity
+                  key={log.id}
+                  style={styles.diaryItem}
+                  onPress={() => navigation.navigate('LogDetail', { logId: log.id })}
+                >
+                  {log.albums?.cover_art_url ? (
+                    <Image source={{ uri: log.albums.cover_art_url }} style={styles.logCover} />
+                  ) : (
+                    <View style={styles.logCoverPlaceholder}>
+                      <Ionicons name="disc-outline" size={24} color="#666" />
+                    </View>
+                  )}
+                  <View style={styles.logInfo}>
+                    <View style={styles.diaryTitleRow}>
+                      <Text style={styles.logTitle} numberOfLines={1}>{log.albums?.title || 'Unknown'}</Text>
+                      {isRelisten && (
+                        <View style={styles.relistenBadge}>
+                          <Ionicons name="repeat" size={10} color="#1DB954" />
+                          <Text style={styles.relistenText}>Relisten</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.logArtist} numberOfLines={1}>{log.albums?.artist || 'Unknown'}</Text>
+                    {log.review_text ? (
+                      <Text style={styles.diarySnippet} numberOfLines={2}>{log.review_text}</Text>
+                    ) : null}
+                    {renderStars(log.rating || 0)}
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#666" />
+                </TouchableOpacity>
+              );
+            })
+          )}
+        </View>
+      )}
+
+      {isOwnProfile && activeTab === 'Lists' && (
+        <View style={styles.listsTabSection}>
+          <Text style={styles.sectionTitle}>My Lists</Text>
+          {userLists.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="list-outline" size={48} color="#666" />
+              <Text style={styles.emptyText}>No lists yet</Text>
+              <TouchableOpacity
+                style={styles.startButton}
+                onPress={() => navigation.navigate('MyLists')}
+              >
+                <Text style={styles.startButtonText}>Create a list</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <>
+              {userLists.map((list) => (
+                <TouchableOpacity
+                  key={list.id}
+                  style={styles.listTabItem}
+                  onPress={() => navigation.navigate('ListDetail', { listId: list.id })}
+                >
+                  <Ionicons name="list" size={24} color="#1DB954" />
+                  <View style={styles.listTabItemInfo}>
+                    <Text style={styles.listTabItemTitle}>{list.title}</Text>
+                    <Text style={styles.listTabItemCount}>{list.item_count ?? 0} albums</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#666" />
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity
+                style={styles.viewAllListsButton}
+                onPress={() => navigation.navigate('MyLists')}
+              >
+                <Text style={styles.viewAllListsText}>Manage lists</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      )}
+
+      {isOwnProfile && activeTab === 'ListenList' && (
+        <View style={styles.listenListSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Listen list</Text>
+            <TouchableOpacity
+              style={styles.addToListenButton}
+              onPress={() => navigation.navigate('Search')}
+            >
+              <Ionicons name="add" size={20} color="#fff" />
+              <Text style={styles.addToListenButtonText}>Add</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.sectionSubtext}>Albums you want to listen to</Text>
+          {listenList.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="headset-outline" size={48} color="#666" />
+              <Text style={styles.emptyText}>Nothing in your listen list</Text>
+              <TouchableOpacity
+                style={styles.startButton}
+                onPress={() => navigation.navigate('Search')}
+              >
+                <Text style={styles.startButtonText}>Find albums to add</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            listenList.map((item: any) => (
+              <TouchableOpacity
+                key={item.id}
+                style={styles.diaryItem}
+                onPress={() => navigation.navigate('AlbumDetail', { albumId: item.album_id })}
+              >
+                {item.albums?.cover_art_url ? (
+                  <Image source={{ uri: item.albums.cover_art_url }} style={styles.logCover} />
+                ) : (
+                  <View style={styles.logCoverPlaceholder}>
+                    <Ionicons name="disc-outline" size={24} color="#666" />
+                  </View>
+                )}
+                <View style={styles.logInfo}>
+                  <Text style={styles.logTitle} numberOfLines={1}>{item.albums?.title || 'Unknown'}</Text>
+                  <Text style={styles.logArtist} numberOfLines={1}>{item.albums?.artist || 'Unknown'}</Text>
+                </View>
+                <TouchableOpacity
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                  onPress={async () => {
+                    try {
+                      await listenListService.removeFromListenList(item.id);
+                      setListenList((prev) => prev.filter((x: any) => x.id !== item.id));
+                    } catch (e: any) {
+                      Alert.alert('Error', e.message || 'Could not remove');
+                    }
+                  }}
+                >
+                  <Ionicons name="close-circle-outline" size={24} color="#666" />
+                </TouchableOpacity>
+              </TouchableOpacity>
+            ))
+          )}
+        </View>
+      )}
+
+      {!isOwnProfile && (
+        <>
+          <View style={styles.statsSection}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{stats.totalLogs}</Text>
+              <Text style={styles.statLabel}>Logs</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{stats.avgRating.toFixed(1)}</Text>
+              <Text style={styles.statLabel}>Avg Rating</Text>
+            </View>
+          </View>
+          <View style={styles.favoritesSection}>
+            <Text style={styles.sectionTitle}>Five Favorites</Text>
+            {favorites.length > 0 ? (
+              <View style={styles.favoritesList}>
+                {favorites.map((fav, index) => renderFavoriteAlbum(fav, index))}
+              </View>
+            ) : (
+              <Text style={styles.emptyText}>No favorites set</Text>
+            )}
+          </View>
+          {stats.collectionCount > 0 && (
+            <View style={styles.collectionSection}>
+              <Text style={styles.sectionTitle}>Collection</Text>
+              <View style={styles.collectionGrid}>
+                {collection.slice(0, 6).map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.collectionItem}
+                    onPress={() => navigation.navigate('AlbumDetail', { albumId: item.album_id })}
+                  >
+                    {item.albums?.cover_art_url ? (
+                      <Image source={{ uri: item.albums.cover_art_url }} style={styles.collectionCover} />
+                    ) : (
+                      <View style={styles.collectionCoverPlaceholder}>
+                        <Ionicons name="disc-outline" size={30} color="#666" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+          <View style={styles.logsSection}>
+            <Text style={styles.sectionTitle}>Recent Logs</Text>
+            {logs.slice(0, 10).map(renderLogItem)}
+          </View>
+        </>
+      )}
     </ScrollView>
   );
 }
@@ -917,5 +1180,124 @@ const styles = StyleSheet.create({
     color: '#666',
     fontSize: 14,
     marginTop: 12,
+  },
+  toggleBar: {
+    flexDirection: 'row',
+    backgroundColor: '#111',
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+    borderRadius: 10,
+    padding: 4,
+  },
+  toggleTab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  toggleTabActive: {
+    backgroundColor: '#1DB954',
+  },
+  toggleTabText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#999',
+  },
+  toggleTabTextActive: {
+    color: '#fff',
+  },
+  sectionSubtext: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 16,
+  },
+  diarySection: {
+    padding: 16,
+  },
+  diaryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#111',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  diaryTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  relistenBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(29, 185, 84, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  relistenText: {
+    fontSize: 10,
+    color: '#1DB954',
+    fontWeight: '600',
+  },
+  diarySnippet: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 2,
+  },
+  listsTabSection: {
+    padding: 16,
+  },
+  listTabItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    backgroundColor: '#111',
+    borderRadius: 8,
+    marginBottom: 8,
+    gap: 12,
+  },
+  listTabItemInfo: {
+    flex: 1,
+  },
+  listTabItemTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  listTabItemCount: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
+  },
+  viewAllListsButton: {
+    marginTop: 16,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  viewAllListsText: {
+    fontSize: 15,
+    color: '#1DB954',
+    fontWeight: '600',
+  },
+  listenListSection: {
+    padding: 16,
+  },
+  addToListenButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#1DB954',
+  },
+  addToListenButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

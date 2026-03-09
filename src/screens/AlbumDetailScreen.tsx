@@ -12,7 +12,7 @@ import {
   Modal,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, albumLogService, collectionService } from '../services/supabase';
+import { supabase, albumLogService, collectionService, listenListService } from '../services/supabase';
 
 interface Album {
   id: string;
@@ -33,27 +33,138 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
   const [userLog, setUserLog] = useState<any>(null);
   const [collectionFormats, setCollectionFormats] = useState<Format[]>([]);
   const [showFormatModal, setShowFormatModal] = useState(false);
+  const [inListenList, setInListenList] = useState(false);
+  const [communityLogs, setCommunityLogs] = useState<any[]>([]);
+  const [communityReviewsLoading, setCommunityReviewsLoading] = useState(false);
 
   useEffect(() => {
     loadData();
   }, [albumId]);
 
+  // Load community reviews whenever we have an albumId (and on focus)
+  useEffect(() => {
+    if (!albumId) return;
+    let cancelled = false;
+    const load = async () => {
+      setCommunityReviewsLoading(true);
+      try {
+        const { data: logs, error: logsError } = await supabase
+          .from('album_logs')
+          .select('id, user_id, album_id, rating, review_text, listened_date, created_at')
+          .eq('album_id', albumId)
+          .order('created_at', { ascending: false });
+
+        if (cancelled) return;
+        if (logsError) {
+          console.warn('Community reviews query error:', logsError);
+          setCommunityLogs([]);
+          return;
+        }
+        const list = logs ?? [];
+        if (list.length === 0) {
+          setCommunityLogs([]);
+          return;
+        }
+        const userIds = [...new Set(list.map((l: any) => l.user_id))];
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, username, avatar_url')
+          .in('id', userIds);
+        const profileMap = new Map((profiles ?? []).map((p: any) => [p.id, p]));
+        const withProfile = list.map((log: any) => ({
+          ...log,
+          username: profileMap.get(log.user_id)?.username ?? 'unknown',
+          avatar_url: profileMap.get(log.user_id)?.avatar_url ?? null,
+        }));
+        if (!cancelled) setCommunityLogs(withProfile);
+      } catch (e) {
+        if (!cancelled) setCommunityLogs([]);
+        console.warn('Community reviews load failed:', e);
+      } finally {
+        if (!cancelled) setCommunityReviewsLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [albumId]);
+
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      if (!loading) {
+      if (!loading && albumId) {
         checkUserLog();
         checkCollection();
+        checkListenList();
+        // Reload community reviews when returning to this screen
+        (async () => {
+          try {
+            const { data: logs } = await supabase
+              .from('album_logs')
+              .select('id, user_id, album_id, rating, review_text, listened_date, created_at')
+              .eq('album_id', albumId)
+              .order('created_at', { ascending: false });
+            const list = logs ?? [];
+            if (list.length === 0) {
+              setCommunityLogs([]);
+              return;
+            }
+            const userIds = [...new Set(list.map((l: any) => l.user_id))];
+            const { data: profiles } = await supabase
+              .from('profiles')
+              .select('id, username, avatar_url')
+              .in('id', userIds);
+            const profileMap = new Map((profiles ?? []).map((p: any) => [p.id, p]));
+            setCommunityLogs(list.map((log: any) => ({
+              ...log,
+              username: profileMap.get(log.user_id)?.username ?? 'unknown',
+              avatar_url: profileMap.get(log.user_id)?.avatar_url ?? null,
+            })));
+          } catch (_) {}
+        })();
       }
     });
     return unsubscribe;
-  }, [navigation, loading]);
+  }, [navigation, loading, albumId]);
+
+  const handleDeleteLog = () => {
+    if (!userLog) return;
+    Alert.alert(
+      'Delete review',
+      'Are you sure you want to delete this review? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await albumLogService.deleteLog(userLog.id);
+              setUserLog(null);
+              setCommunityLogs((prev) => prev.filter((l) => l.id !== userLog.id));
+            } catch (e: any) {
+              Alert.alert('Error', e.message || 'Could not delete');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const loadData = async () => {
     await Promise.all([
       loadAlbum(),
       checkUserLog(),
       checkCollection(),
+      checkListenList(),
     ]);
+  };
+
+  const checkListenList = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const inList = await listenListService.isInListenList(user.id, albumId);
+      setInListenList(inList);
+    } catch (_) {}
   };
 
   const loadAlbum = async () => {
@@ -83,6 +194,8 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
         .select('*')
         .eq('album_id', albumId)
         .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       setUserLog(data);
@@ -371,11 +484,23 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
           <View style={styles.userLogSection}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Your Review</Text>
-              {userLog.is_favorite && (
-                <Ionicons name="heart" size={20} color="#FF0000" />
-              )}
+              <View style={styles.userLogHeaderRight}>
+                {userLog.is_favorite && (
+                  <Ionicons name="heart" size={20} color="#FF0000" />
+                )}
+                <TouchableOpacity
+                  onPress={handleDeleteLog}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                >
+                  <Ionicons name="trash-outline" size={22} color="#e74c3c" />
+                </TouchableOpacity>
+              </View>
             </View>
-            <View style={styles.userLogCard}>
+            <TouchableOpacity
+              style={styles.userLogCard}
+              onPress={() => navigation.navigate('LogDetail', { logId: userLog.id })}
+              activeOpacity={0.9}
+            >
               {renderStars(userLog.rating || 0)}
               {userLog.review_text && (
                 <Text style={styles.reviewText}>{userLog.review_text}</Text>
@@ -383,7 +508,7 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
               <Text style={styles.logDate}>
                 Logged on {new Date(userLog.listened_date).toLocaleDateString()}
               </Text>
-            </View>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -413,15 +538,97 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
               {inCollection ? `In Collection (${collectionFormats.length})` : 'Add to Collection'}
             </Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.secondaryButton, inListenList && styles.secondaryButtonActive]}
+            onPress={async () => {
+              try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (!user) return;
+                if (inListenList) {
+                  await listenListService.removeFromListenListByAlbum(user.id, albumId);
+                  setInListenList(false);
+                } else {
+                  await listenListService.addToListenList(user.id, albumId);
+                  setInListenList(true);
+                }
+              } catch (e: any) {
+                Alert.alert('Error', e.message || 'Could not update listen list');
+              }
+            }}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name={inListenList ? 'headset' : 'headset-outline'}
+              size={22}
+              color={inListenList ? '#1DB954' : '#fff'}
+            />
+            <Text style={[styles.secondaryButtonText, inListenList && styles.secondaryButtonTextActive]}>
+              {inListenList ? 'In Listen List' : 'Add to Listen List'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.reviewsSection}>
-          <Text style={styles.sectionTitle}>Community Reviews</Text>
-          <View style={styles.emptyState}>
-            <Ionicons name="chatbubbles-outline" size={48} color="#666" />
-            <Text style={styles.emptyText}>No reviews yet</Text>
-            <Text style={styles.emptySubtext}>Be the first to log this album!</Text>
-          </View>
+          <Text style={styles.sectionTitle}>
+            Community Reviews
+            {communityLogs.length > 0 && ` (${communityLogs.length})`}
+          </Text>
+          {communityReviewsLoading ? (
+            <View style={styles.emptyState}>
+              <ActivityIndicator size="small" color="#1DB954" />
+              <Text style={styles.emptySubtext}>Loading reviews…</Text>
+            </View>
+          ) : communityLogs.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="chatbubbles-outline" size={48} color="#666" />
+              <Text style={styles.emptyText}>No reviews yet</Text>
+              <Text style={styles.emptySubtext}>Be the first to log this album!</Text>
+            </View>
+          ) : (
+            communityLogs.map((log) => {
+              const sameUserLogs = communityLogs
+                .filter((l) => l.user_id === log.user_id)
+                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+              const isRelisten = sameUserLogs.length > 1 && sameUserLogs[0].id !== log.id;
+              return (
+                <TouchableOpacity
+                  key={log.id}
+                  style={styles.communityReviewCard}
+                  onPress={() => navigation.navigate('LogDetail', { logId: log.id })}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.communityReviewHeader}>
+                    {log.avatar_url ? (
+                      <Image source={{ uri: log.avatar_url }} style={styles.communityReviewAvatar} />
+                    ) : (
+                      <View style={styles.communityReviewAvatarPlaceholder}>
+                        <Ionicons name="person-circle-outline" size={40} color="#666" />
+                      </View>
+                    )}
+                    <View style={styles.communityReviewMeta}>
+                      <View style={styles.communityReviewTitleRow}>
+                        <Text style={styles.communityReviewUsername}>@{log.username}</Text>
+                        {isRelisten && (
+                          <View style={styles.relistenBadge}>
+                            <Ionicons name="repeat" size={12} color="#1DB954" />
+                            <Text style={styles.relistenText}>Relisten</Text>
+                          </View>
+                        )}
+                      </View>
+                      {renderStars(log.rating)}
+                    </View>
+                  </View>
+                  {log.review_text ? (
+                    <Text style={styles.communityReviewText} numberOfLines={4}>{log.review_text}</Text>
+                  ) : null}
+                  <Text style={styles.communityReviewDate}>
+                    {new Date(log.listened_date).toLocaleDateString()}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })
+          )}
         </View>
       </ScrollView>
 
@@ -530,6 +737,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
+  userLogHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   userLogCard: {
     backgroundColor: '#111',
     padding: 16,
@@ -595,6 +807,71 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#222',
     marginTop: 8,
+  },
+  communityReviewCard: {
+    backgroundColor: '#111',
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+  communityReviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  communityReviewAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  communityReviewAvatarPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#222',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  communityReviewMeta: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  communityReviewTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  communityReviewUsername: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  relistenBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(29, 185, 84, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  relistenText: {
+    fontSize: 11,
+    color: '#1DB954',
+    fontWeight: '600',
+  },
+  communityReviewText: {
+    fontSize: 14,
+    color: '#ddd',
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  communityReviewDate: {
+    fontSize: 12,
+    color: '#666',
   },
   emptyState: {
     alignItems: 'center',
