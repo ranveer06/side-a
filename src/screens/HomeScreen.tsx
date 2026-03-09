@@ -246,8 +246,10 @@ export default function HomeScreen({ navigation }: any) {
             : f
         )
       );
-    } catch (e) {
-      console.error('Like error:', e);
+    } catch (e: any) {
+      console.error('Like error:', e?.message ?? e);
+      // Refetch feed so counts stay correct
+      loadFeed();
     } finally {
       setLikingLogId(null);
     }
@@ -339,35 +341,47 @@ export default function HomeScreen({ navigation }: any) {
     );
   };
 
-  const renderTopReviewed = () => {
-    if (topReviewed.length === 0) return null;
-    return (
-      <View style={styles.topReviewedSection}>
-        <Text style={styles.topReviewedTitle}>Most reviewed</Text>
-        <View style={styles.topReviewedRow}>
-          {topReviewed.map((album) => (
-            <TouchableOpacity
-              key={album.album_id}
-              style={styles.topReviewedItem}
-              onPress={() => navigation.navigate('AlbumDetail', { albumId: album.album_id })}
-            >
-              {album.cover_art_url ? (
-                <Image source={{ uri: album.cover_art_url }} style={styles.topReviewedCover} />
-              ) : (
-                <View style={styles.topReviewedCoverPlaceholder}>
-                  <Ionicons name="disc-outline" size={28} color="#666" />
-                </View>
-              )}
-              <Text style={styles.topReviewedAlbumTitle} numberOfLines={1}>
-                {album.title}
-              </Text>
-              <Text style={styles.topReviewedCount}>{album.review_count} reviews</Text>
-            </TouchableOpacity>
-          ))}
+  const renderListHeader = () => (
+    <>
+      <TouchableOpacity
+        style={styles.discoverListsRow}
+        onPress={() => navigation.navigate('PublicLists')}
+        activeOpacity={0.8}
+      >
+        <View style={styles.discoverListsIconWrap}>
+          <Ionicons name="list" size={24} color="#1DB954" />
         </View>
-      </View>
-    );
-  };
+        <Text style={styles.discoverListsTitle}>Discover public lists</Text>
+        <Ionicons name="chevron-forward" size={20} color="#666" />
+      </TouchableOpacity>
+      {topReviewed.length > 0 && (
+        <View style={styles.topReviewedSection}>
+          <Text style={styles.topReviewedTitle}>Most reviewed</Text>
+          <View style={styles.topReviewedRow}>
+            {topReviewed.map((album) => (
+              <TouchableOpacity
+                key={album.album_id}
+                style={styles.topReviewedItem}
+                onPress={() => navigation.navigate('AlbumDetail', { albumId: album.album_id })}
+              >
+                {album.cover_art_url ? (
+                  <Image source={{ uri: album.cover_art_url }} style={styles.topReviewedCover} />
+                ) : (
+                  <View style={styles.topReviewedCoverPlaceholder}>
+                    <Ionicons name="disc-outline" size={28} color="#666" />
+                  </View>
+                )}
+                <Text style={styles.topReviewedAlbumTitle} numberOfLines={1}>
+                  {album.title}
+                </Text>
+                <Text style={styles.topReviewedCount}>{album.review_count} reviews</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
+    </>
+  );
 
   if (loading) {
     return (
@@ -411,7 +425,7 @@ export default function HomeScreen({ navigation }: any) {
           data={feed}
           renderItem={renderFeedItem}
           keyExtractor={(item) => item.log_id}
-          ListHeaderComponent={renderTopReviewed()}
+          ListHeaderComponent={renderListHeader()}
           contentContainerStyle={styles.feedList}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -559,10 +573,10 @@ const styles = StyleSheet.create({
   },
   likeCount: {
     marginLeft: 6,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#999',
-    minWidth: 18,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ddd',
+    minWidth: 20,
   },
   commentButton: {
     flexDirection: 'row',
@@ -571,10 +585,31 @@ const styles = StyleSheet.create({
   },
   commentCount: {
     marginLeft: 6,
-    fontSize: 14,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ddd',
+    minWidth: 20,
+  },
+  discoverListsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 8,
+    backgroundColor: '#111',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+  discoverListsIconWrap: {
+    marginRight: 12,
+  },
+  discoverListsTitle: {
+    flex: 1,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#999',
-    minWidth: 18,
+    color: '#fff',
   },
   topReviewedSection: {
     padding: 16,

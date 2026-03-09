@@ -341,27 +341,33 @@ export const socialService = {
   getFollowers: async (userId: string) => {
     const { data, error } = await supabase
       .from('follows')
-      .select(`
-        follower_id,
-        profiles!follows_follower_id_fkey (*)
-      `)
+      .select('follower_id')
       .eq('following_id', userId);
     
     if (error) throw error;
-    return data;
+    const ids = (data ?? []).map((r: { follower_id: string }) => r.follower_id);
+    if (ids.length === 0) return [];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, username, display_name, avatar_url, bio')
+      .in('id', ids);
+    return profiles ?? [];
   },
   
   getFollowing: async (userId: string) => {
     const { data, error } = await supabase
       .from('follows')
-      .select(`
-        following_id,
-        profiles!follows_following_id_fkey (*)
-      `)
+      .select('following_id')
       .eq('follower_id', userId);
     
     if (error) throw error;
-    return data;
+    const ids = (data ?? []).map((r: { following_id: string }) => r.following_id);
+    if (ids.length === 0) return [];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, username, display_name, avatar_url, bio')
+      .in('id', ids);
+    return profiles ?? [];
   },
   
   getActivityFeed: async (limit = 20, offset = 0) => {
@@ -466,20 +472,29 @@ export const logLikeService = {
   toggleLike: async (logId: string): Promise<{ liked: boolean; count: number }> => {
     const user = await authService.getCurrentUser();
     if (!user) throw new Error('Not authenticated');
-    const existing = await supabase
+    const { data: existing } = await supabase
       .from('log_likes')
       .select('id')
       .eq('log_id', logId)
       .eq('user_id', user.id)
       .maybeSingle();
-    if (existing.data) {
-      await supabase.from('log_likes').delete().eq('log_id', logId).eq('user_id', user.id);
-      const { count } = await supabase.from('log_likes').select('*', { count: 'exact', head: true }).eq('log_id', logId);
-      return { liked: false, count: count ?? 0 };
+
+    if (existing) {
+      const { error: delError } = await supabase
+        .from('log_likes')
+        .delete()
+        .eq('log_id', logId)
+        .eq('user_id', user.id);
+      if (delError) throw delError;
+      const { data: rows } = await supabase.from('log_likes').select('log_id').eq('log_id', logId);
+      return { liked: false, count: rows?.length ?? 0 };
     } else {
-      await supabase.from('log_likes').insert([{ log_id: logId, user_id: user.id }]);
-      const { count } = await supabase.from('log_likes').select('*', { count: 'exact', head: true }).eq('log_id', logId);
-      return { liked: true, count: count ?? 1 };
+      const { error: insertError } = await supabase
+        .from('log_likes')
+        .insert([{ log_id: logId, user_id: user.id }]);
+      if (insertError) throw insertError;
+      const { data: rows } = await supabase.from('log_likes').select('log_id').eq('log_id', logId);
+      return { liked: true, count: rows?.length ?? 1 };
     }
   },
 };

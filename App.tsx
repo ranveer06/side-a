@@ -11,7 +11,9 @@ import type { Session } from '@supabase/supabase-js';
 import HomeScreen from './src/screens/HomeScreen';
 import SearchScreen from './src/screens/SearchScreen';
 import CollectionScreen from './src/screens/CollectionScreen';
+import ActivityScreen from './src/screens/ActivityScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import PublicListsScreen from './src/screens/PublicListsScreen';
 import AlbumDetailScreen from './src/screens/AlbumDetailScreen';
 import LogModalScreen from './src/screens/LogModalScreen';
 import FindUsersScreen from './src/screens/FindUsersScreen';
@@ -52,6 +54,9 @@ function MainTabs() {
             case 'Collection':
               iconName = focused ? 'albums' : 'albums-outline';
               break;
+            case 'Activity':
+              iconName = focused ? 'flash' : 'flash-outline';
+              break;
             case 'Profile':
               iconName = focused ? 'person' : 'person-outline';
               break;
@@ -73,6 +78,7 @@ function MainTabs() {
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Search" component={SearchScreen} />
       <Tab.Screen name="Collection" component={CollectionScreen} />
+      <Tab.Screen name="Activity" component={ActivityScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );
@@ -102,9 +108,12 @@ function AppStack() {
       <Stack.Screen 
         name="FindUsers" 
         component={FindUsersScreen}
-        options={{ 
-          headerShown: false,
-        }}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen 
+        name="PublicLists"
+        component={PublicListsScreen}
+        options={{ title: 'Discover Lists', headerTitleAlign: 'center', headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff' }}
       />
       <Stack.Screen 
         name="EditProfile" 
