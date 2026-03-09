@@ -2,9 +2,9 @@
   "expo": {
     "name": "Side A",
     "slug": "side-a",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/icon.png",
@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.ronny.sidea",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Side A needs access to your photos to upload profile pictures.",
         "NSCameraUsageDescription": "Side A needs access to your camera to take profile pictures.",

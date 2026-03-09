@@ -99,7 +99,11 @@ export default function FindUsersScreen({ navigation }: any) {
   );
 
   const renderUser = ({ item }: { item: User }) => (
-    <View style={styles.userItem}>
+    <TouchableOpacity
+      style={styles.userItem}
+      onPress={() => navigation.navigate('UserProfile', { userId: item.id })}
+      activeOpacity={0.8}
+    >
       <View style={styles.userAvatar}>
         <Ionicons name="person-circle-outline" size={50} color="#666" />
       </View>
@@ -114,13 +118,16 @@ export default function FindUsersScreen({ navigation }: any) {
       </View>
       <TouchableOpacity
         style={[styles.followButton, item.isFollowing && styles.followingButton]}
-        onPress={() => handleToggleFollow(item.id)}
+        onPress={(e) => {
+          e.stopPropagation();
+          handleToggleFollow(item.id);
+        }}
       >
         <Text style={[styles.followButtonText, item.isFollowing && styles.followingButtonText]}>
           {item.isFollowing ? 'Following' : 'Follow'}
         </Text>
       </TouchableOpacity>
-    </View>
+    </TouchableOpacity>
   );
 
   if (loading) {

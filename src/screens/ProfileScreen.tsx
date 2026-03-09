@@ -12,7 +12,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, albumLogService, profileService, authService } from '../services/supabase';
+import { supabase, albumLogService, profileService, authService, socialService } from '../services/supabase';
 
 export default function ProfileScreen({ route, navigation }: any) {
   // Check if viewing another user's profile
@@ -33,6 +33,7 @@ export default function ProfileScreen({ route, navigation }: any) {
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isFollowingViewingUser, setIsFollowingViewingUser] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -105,6 +106,19 @@ export default function ProfileScreen({ route, navigation }: any) {
         .from('follows')
         .select('*', { count: 'exact', head: true })
         .eq('following_id', profileUserId);
+
+      // When viewing another user, check if current user follows them
+      let followingViewing = false;
+      if (viewingUserId && user && user.id !== viewingUserId) {
+        const { data: followRow } = await supabase
+          .from('follows')
+          .select('following_id')
+          .eq('follower_id', user.id)
+          .eq('following_id', viewingUserId)
+          .maybeSingle();
+        followingViewing = !!followRow;
+      }
+      setIsFollowingViewingUser(followingViewing);
 
       // Load collection items for preview (up to 6)
       const { data: collectionData } = await supabase
@@ -258,7 +272,9 @@ export default function ProfileScreen({ route, navigation }: any) {
     >
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <Text style={styles.headerTitle}>Profile</Text>
+          <Text style={styles.headerTitle}>
+            {isOwnProfile ? 'Profile' : `@${profile?.username ?? 'User'}`}
+          </Text>
           {isOwnProfile && (
             <TouchableOpacity onPress={handleSignOut}>
               <Ionicons name="log-out-outline" size={24} color="#999" />
@@ -289,6 +305,31 @@ export default function ProfileScreen({ route, navigation }: any) {
         
         {profile?.bio && (
           <Text style={styles.bio}>{profile.bio}</Text>
+        )}
+
+        {/* Follow button when viewing another user's profile */}
+        {!isOwnProfile && (
+          <TouchableOpacity
+            style={[styles.followProfileButton, isFollowingViewingUser && styles.followProfileButtonFollowing]}
+            onPress={async () => {
+              if (!viewingUserId) return;
+              try {
+                if (isFollowingViewingUser) {
+                  await socialService.unfollowUser(viewingUserId);
+                  setIsFollowingViewingUser(false);
+                } else {
+                  await socialService.followUser(viewingUserId);
+                  setIsFollowingViewingUser(true);
+                }
+              } catch (e: any) {
+                Alert.alert('Error', e.message || 'Could not update follow');
+              }
+            }}
+          >
+            <Text style={[styles.followProfileButtonText, isFollowingViewingUser && styles.followProfileButtonTextFollowing]}>
+              {isFollowingViewingUser ? 'Following' : 'Follow'}
+            </Text>
+          </TouchableOpacity>
         )}
 
         {/* Action Buttons - Only show if viewing own profile */}
@@ -396,9 +437,11 @@ export default function ProfileScreen({ route, navigation }: any) {
         <View style={styles.collectionSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Collection</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Collection')}>
-              <Text style={styles.viewAllText}>View All ({stats.collectionCount})</Text>
-            </TouchableOpacity>
+            {isOwnProfile && (
+              <TouchableOpacity onPress={() => navigation.navigate('Collection')}>
+                <Text style={styles.viewAllText}>View All ({stats.collectionCount})</Text>
+              </TouchableOpacity>
+            )}
           </View>
           <View style={styles.collectionGrid}>
             {collection.map((item, index) => (
@@ -538,6 +581,26 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     paddingHorizontal: 20,
+  },
+  followProfileButton: {
+    marginTop: 16,
+    paddingHorizontal: 28,
+    paddingVertical: 10,
+    borderRadius: 24,
+    backgroundColor: '#1DB954',
+  },
+  followProfileButtonFollowing: {
+    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  followProfileButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  followProfileButtonTextFollowing: {
+    color: '#999',
   },
   actionButtons: {
     flexDirection: 'row',

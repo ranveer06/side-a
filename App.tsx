@@ -23,6 +23,10 @@ import MyListsScreen from './src/screens/MyListsScreen';
 import CreateListScreen from './src/screens/CreateListScreen';
 import ListDetailScreen from './src/screens/ListDetailScreen';
 import AddToListScreen from './src/screens/AddToListScreen';
+import LogCommentsScreen from './src/screens/LogCommentsScreen';
+import LogDetailScreen from './src/screens/LogDetailScreen';
+import UserProfileScreen from './src/screens/UserProfileScreen';
+import ArtistAlbumsScreen from './src/screens/ArtistAlbumsScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import SignUpScreen from './src/screens/SignUpScreen';
 
@@ -157,6 +161,26 @@ function AppStack() {
         options={{ 
           headerShown: false,
         }}
+      />
+      <Stack.Screen 
+        name="LogComments" 
+        component={LogCommentsScreen}
+        options={{ title: 'Comments', headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff' }}
+      />
+      <Stack.Screen 
+        name="LogDetail" 
+        component={LogDetailScreen}
+        options={{ title: 'Review', headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff' }}
+      />
+      <Stack.Screen 
+        name="UserProfile" 
+        component={UserProfileScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen 
+        name="ArtistAlbums" 
+        component={ArtistAlbumsScreen}
+        options={{ headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff' }}
       />
       {/* Log as a modal */}
       <Stack.Screen 

@@ -12,31 +12,21 @@ import {
   Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { musicBrainzService, type SearchResult } from '../services/musicbrainz';
+import { spotifyService, type SpotifySearchResult, type SpotifyArtistResult } from '../services/spotify';
 
-interface EnrichedSearchResult extends SearchResult {
-  coverArtUrl?: string;
+type SearchMode = 'albums' | 'artists';
+
+interface EnrichedSearchResult extends SpotifySearchResult {
   loading?: boolean;
 }
 
 export default function SearchScreen({ navigation }: any) {
   const [query, setQuery] = useState('');
+  const [mode, setMode] = useState<SearchMode>('albums');
   const [results, setResults] = useState<EnrichedSearchResult[]>([]);
+  const [artistResults, setArtistResults] = useState<SpotifyArtistResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-
-  const fetchCoverArt = async (mbid: string): Promise<string | undefined> => {
-    try {
-      const response = await fetch(`https://coverartarchive.org/release-group/${mbid}`);
-      if (response.ok) {
-        const data = await response.json();
-        const frontCover = data.images?.find((img: any) => img.front === true);
-        return frontCover?.thumbnails?.small || data.images?.[0]?.thumbnails?.small;
-      }
-    } catch (error) {
-      return undefined;
-    }
-  };
 
   const handleSearch = async () => {
     if (!query.trim()) return;
@@ -46,34 +36,15 @@ export default function SearchScreen({ navigation }: any) {
     setHasSearched(true);
 
     try {
-      const searchResults = await musicBrainzService.searchAlbums(query, 20);
-      
-      const enrichedResults: EnrichedSearchResult[] = searchResults.map(r => ({
-        ...r,
-        loading: true,
-      }));
-      setResults(enrichedResults);
-
-      const coverArtPromises = searchResults.map(async (result, index) => {
-        const coverUrl = await fetchCoverArt(result.id);
-        return { index, coverUrl };
-      });
-
-      Promise.all(coverArtPromises).then(covers => {
-        setResults(prev => {
-          const updated = [...prev];
-          covers.forEach(({ index, coverUrl }) => {
-            if (updated[index]) {
-              updated[index] = {
-                ...updated[index],
-                coverArtUrl: coverUrl,
-                loading: false,
-              };
-            }
-          });
-          return updated;
-        });
-      });
+      if (mode === 'artists') {
+        const artists = await spotifyService.searchArtists(query, 20);
+        setArtistResults(artists);
+        setResults([]);
+      } else {
+        const searchResults = await spotifyService.searchAlbums(query, 20);
+        setResults(searchResults.map(r => ({ ...r, loading: false })));
+        setArtistResults([]);
+      }
     } catch (error) {
       console.error('Search error:', error);
     } finally {
@@ -82,12 +53,31 @@ export default function SearchScreen({ navigation }: any) {
   };
 
   const handleAlbumPress = async (result: EnrichedSearchResult) => {
-    const album = await musicBrainzService.getOrCacheAlbum(result.id);
-    
+    const album = await spotifyService.getOrCacheAlbum(result.id);
     if (album) {
       navigation.navigate('AlbumDetail', { albumId: album.id });
     }
   };
+
+  const renderArtistResult = ({ item }: { item: SpotifyArtistResult }) => (
+    <TouchableOpacity
+      style={styles.resultItem}
+      onPress={() => navigation.navigate('ArtistAlbums', { artistId: item.id, artistName: item.name })}
+    >
+      {item.imageUrl ? (
+        <Image source={{ uri: item.imageUrl }} style={styles.artistImage} />
+      ) : (
+        <View style={styles.albumPlaceholder}>
+          <Ionicons name="person" size={40} color="#666" />
+        </View>
+      )}
+      <View style={styles.resultInfo}>
+        <Text style={styles.albumTitle} numberOfLines={1}>{item.name}</Text>
+        <Text style={styles.artist}>Artist</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={20} color="#666" />
+    </TouchableOpacity>
+  );
 
   const renderSearchResult = ({ item }: { item: EnrichedSearchResult }) => (
     <TouchableOpacity
@@ -95,10 +85,7 @@ export default function SearchScreen({ navigation }: any) {
       onPress={() => handleAlbumPress(item)}
     >
       {item.coverArtUrl ? (
-        <Image 
-          source={{ uri: item.coverArtUrl }} 
-          style={styles.albumCover}
-        />
+        <Image source={{ uri: item.coverArtUrl }} style={styles.albumCover} />
       ) : item.loading ? (
         <View style={styles.albumPlaceholder}>
           <ActivityIndicator size="small" color="#666" />
@@ -136,7 +123,7 @@ export default function SearchScreen({ navigation }: any) {
           <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search for albums..."
+            placeholder={mode === 'artists' ? 'Search for artists...' : 'Search for albums...'}
             placeholderTextColor="#666"
             value={query}
             onChangeText={setQuery}
@@ -160,27 +147,57 @@ export default function SearchScreen({ navigation }: any) {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.segmentRow}>
+        <TouchableOpacity
+          style={[styles.segmentTab, mode === 'albums' && styles.segmentTabActive]}
+          onPress={() => { setMode('albums'); setHasSearched(false); setResults([]); setArtistResults([]); }}
+        >
+          <Text style={[styles.segmentText, mode === 'albums' && styles.segmentTextActive]}>Albums</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.segmentTab, mode === 'artists' && styles.segmentTabActive]}
+          onPress={() => { setMode('artists'); setHasSearched(false); setResults([]); setArtistResults([]); }}
+        >
+          <Text style={[styles.segmentText, mode === 'artists' && styles.segmentTextActive]}>Artists</Text>
+        </TouchableOpacity>
+      </View>
+
       {loading ? (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#1DB954" />
-          <Text style={styles.loadingText}>Searching albums...</Text>
+          <Text style={styles.loadingText}>
+            {mode === 'artists' ? 'Searching artists...' : 'Searching albums...'}
+          </Text>
         </View>
-      ) : hasSearched && results.length === 0 ? (
+      ) : hasSearched && mode === 'albums' && results.length === 0 ? (
         <View style={styles.centerContainer}>
           <Ionicons name="search-outline" size={64} color="#666" />
-          <Text style={styles.emptyText}>No results found</Text>
-          <Text style={styles.emptySubtext}>
-            Try searching with different keywords
-          </Text>
+          <Text style={styles.emptyText}>No albums found</Text>
+          <Text style={styles.emptySubtext}>Try different keywords or search by artist</Text>
+        </View>
+      ) : hasSearched && mode === 'artists' && artistResults.length === 0 ? (
+        <View style={styles.centerContainer}>
+          <Ionicons name="search-outline" size={64} color="#666" />
+          <Text style={styles.emptyText}>No artists found</Text>
+          <Text style={styles.emptySubtext}>Try a different name</Text>
         </View>
       ) : !hasSearched ? (
         <View style={styles.centerContainer}>
           <Ionicons name="musical-notes-outline" size={64} color="#666" />
-          <Text style={styles.emptyText}>Search for albums</Text>
+          <Text style={styles.emptyText}>
+            {mode === 'artists' ? 'Search for artists' : 'Search for albums'}
+          </Text>
           <Text style={styles.emptySubtext}>
-            Find albums to log and review
+            {mode === 'artists' ? 'See all albums by an artist' : 'Find albums to log and review'}
           </Text>
         </View>
+      ) : mode === 'artists' ? (
+        <FlatList
+          data={artistResults}
+          renderItem={renderArtistResult}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.resultsList}
+        />
       ) : (
         <FlatList
           data={results}
@@ -307,5 +324,33 @@ const styles = StyleSheet.create({
   releaseDate: {
     fontSize: 12,
     color: '#666',
+  },
+  segmentRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    gap: 8,
+  },
+  segmentTab: {
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    backgroundColor: '#1a1a1a',
+  },
+  segmentTabActive: {
+    backgroundColor: '#1DB954',
+  },
+  segmentText: {
+    fontSize: 14,
+    color: '#999',
+    fontWeight: '600',
+  },
+  segmentTextActive: {
+    color: '#fff',
+  },
+  artistImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
   },
 });

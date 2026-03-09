@@ -10,7 +10,7 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
-import { supabase } from '../services/supabase';
+import { supabase, logCommentService, logLikeService } from '../services/supabase';
 import { Ionicons } from '@expo/vector-icons';
 
 interface FeedItem {
@@ -27,13 +27,25 @@ interface FeedItem {
   listened_date: string;
   created_at: string;
   likes_count: number;
+  comments_count: number;
+  is_liked?: boolean;
+}
+
+interface TopReviewedAlbum {
+  album_id: string;
+  title: string;
+  artist: string;
+  cover_art_url: string | null;
+  review_count: number;
 }
 
 export default function HomeScreen({ navigation }: any) {
   const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [topReviewed, setTopReviewed] = useState<TopReviewedAlbum[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [likingLogId, setLikingLogId] = useState<string | null>(null);
 
   useEffect(() => {
     loadFeed();
@@ -56,13 +68,16 @@ export default function HomeScreen({ navigation }: any) {
 
       setCurrentUserId(user.id);
 
-      // Get who you're following
-      const { data: followingData } = await supabase
-        .from('follows')
-        .select('following_id')
-        .eq('follower_id', user.id);
-
-      const followingIds = new Set(followingData?.map(f => f.following_id) || []);
+      let followingIds = new Set<string>();
+      try {
+        const { data: followingData } = await supabase
+          .from('follows')
+          .select('following_id')
+          .eq('follower_id', user.id);
+        followingIds = new Set(followingData?.map((f: { following_id: string }) => f.following_id) || []);
+      } catch (_) {
+        // follows table may not exist or RLS may block
+      }
 
       // Get ALL logs from everyone (public feed)
       const { data: logs, error: logsError } = await supabase
@@ -84,27 +99,74 @@ export default function HomeScreen({ navigation }: any) {
       const uniqueUserIds = [...new Set(logs.map(log => log.user_id))];
       const uniqueAlbumIds = [...new Set(logs.map(log => log.album_id))];
 
-      // Fetch profiles
+      // Fetch profiles (don't fail feed if this errors)
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('id, username, avatar_url')
         .in('id', uniqueUserIds);
+      if (profilesError) console.warn('Feed profiles:', profilesError);
 
-      if (profilesError) throw profilesError;
-
-      // Fetch albums
+      // Fetch albums (don't fail feed if this errors)
       const { data: albums, error: albumsError } = await supabase
         .from('albums')
         .select('id, title, artist, cover_art_url')
         .in('id', uniqueAlbumIds);
-
-      if (albumsError) throw albumsError;
+      if (albumsError) console.warn('Feed albums:', albumsError);
 
       // Create lookup maps
       const profilesMap = new Map(profiles?.map(p => [p.id, p]) || []);
       const albumsMap = new Map(albums?.map(a => [a.id, a]) || []);
 
-      // Combine data
+      const logIds = logs.map((log) => log.id);
+      let commentCounts: Record<string, number> = {};
+      let likeCounts: Record<string, number> = {};
+      let likedSet = new Set<string>();
+      try {
+        const [comments, likes, liked] = await Promise.all([
+          logCommentService.getCommentCountsForLogs(logIds),
+          logLikeService.getLikeCountsForLogs(logIds),
+          logLikeService.getLogIdsLikedByUser(logIds),
+        ]);
+        commentCounts = comments;
+        likeCounts = likes;
+        likedSet = liked;
+      } catch (e) {
+        console.warn('Comments/likes not available:', e);
+      }
+
+      let topReviewedData: TopReviewedAlbum[] = [];
+      try {
+        const { data: topLogs } = await supabase
+          .from('album_logs')
+          .select('album_id')
+          .limit(500);
+        const albumCounts: Record<string, number> = {};
+        (topLogs ?? []).forEach((row: { album_id: string }) => {
+          albumCounts[row.album_id] = (albumCounts[row.album_id] ?? 0) + 1;
+        });
+        const topAlbumIds = Object.entries(albumCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(([id]) => id);
+        if (topAlbumIds.length > 0) {
+          const { data: topAlbums } = await supabase
+            .from('albums')
+            .select('id, title, artist, cover_art_url')
+            .in('id', topAlbumIds);
+          const byId = new Map((topAlbums ?? []).map((a: any) => [a.id, a]));
+          topReviewedData = topAlbumIds.map((id) => ({
+            album_id: id,
+            title: byId.get(id)?.title ?? 'Unknown',
+            artist: byId.get(id)?.artist ?? 'Unknown',
+            cover_art_url: byId.get(id)?.cover_art_url ?? null,
+            review_count: albumCounts[id],
+          }));
+        }
+      } catch (e) {
+        console.warn('Top reviewed section failed:', e);
+      }
+      setTopReviewed(topReviewedData);
+
       const feedItems: FeedItem[] = logs.map(log => {
         const profile = profilesMap.get(log.user_id);
         const album = albumsMap.get(log.album_id);
@@ -122,7 +184,9 @@ export default function HomeScreen({ navigation }: any) {
           review_text: log.review_text,
           listened_date: log.listened_date,
           created_at: log.created_at,
-          likes_count: 0,
+          likes_count: likeCounts[log.id] ?? 0,
+          comments_count: commentCounts[log.id] ?? 0,
+          is_liked: likedSet.has(log.id),
         };
       });
 
@@ -170,69 +234,138 @@ export default function HomeScreen({ navigation }: any) {
     );
   };
 
+  const handleLike = async (logId: string) => {
+    if (likingLogId) return;
+    setLikingLogId(logId);
+    try {
+      const result = await logLikeService.toggleLike(logId);
+      setFeed((prev) =>
+        prev.map((f) =>
+          f.log_id === logId
+            ? { ...f, likes_count: result.count, is_liked: result.liked }
+            : f
+        )
+      );
+    } catch (e) {
+      console.error('Like error:', e);
+    } finally {
+      setLikingLogId(null);
+    }
+  };
+
   const renderFeedItem = ({ item }: { item: FeedItem }) => {
     const isOwnLog = item.user_id === currentUserId;
-    
+
     return (
-      <TouchableOpacity
-        style={styles.feedItem}
-        onPress={() => navigation.navigate('AlbumDetail', { albumId: item.album_id })}
-      >
+      <View style={styles.feedItem}>
         <View style={styles.feedHeader}>
-          <View style={styles.avatar}>
-            {item.avatar_url ? (
-              <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
-            ) : (
-              <Ionicons name="person-circle-outline" size={40} color="#666" />
-            )}
-          </View>
-          <View style={styles.headerText}>
-            <Text style={styles.username}>
-              {isOwnLog ? 'You' : `@${item.username}`}
-            </Text>
-            <Text style={styles.action}>logged an album</Text>
-          </View>
+          <TouchableOpacity
+            style={styles.feedHeaderTouchable}
+            onPress={() => {
+              if (isOwnLog) navigation.navigate('Profile');
+              else navigation.navigate('UserProfile', { userId: item.user_id });
+            }}
+          >
+            <View style={styles.avatar}>
+              {item.avatar_url ? (
+                <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
+              ) : (
+                <Ionicons name="person-circle-outline" size={40} color="#666" />
+              )}
+            </View>
+            <View style={styles.headerText}>
+              <Text style={styles.username}>
+                {isOwnLog ? 'You' : `@${item.username}`}
+              </Text>
+              <Text style={styles.action}>logged an album</Text>
+            </View>
+          </TouchableOpacity>
           <Text style={styles.timeAgo}>{formatTimeAgo(item.created_at)}</Text>
         </View>
 
-        <View style={styles.albumContent}>
-          {item.cover_art_url ? (
-            <Image
-              source={{ uri: item.cover_art_url }}
-              style={styles.albumCover}
-            />
-          ) : (
-            <View style={styles.albumCoverPlaceholder}>
-              <Ionicons name="disc-outline" size={40} color="#666" />
-            </View>
-          )}
-          <View style={styles.albumInfo}>
-            <Text style={styles.albumTitle} numberOfLines={1}>
-              {item.album_title}
-            </Text>
-            <Text style={styles.artist} numberOfLines={1}>
-              {item.artist}
-            </Text>
-            {renderStars(item.rating)}
-          </View>
-        </View>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('LogDetail', { logId: item.log_id })}
+        >
 
-        {item.review_text && (
-          <Text style={styles.reviewText} numberOfLines={3}>
-            {item.review_text}
-          </Text>
-        )}
+          <View style={styles.albumContent}>
+            {item.cover_art_url ? (
+              <Image source={{ uri: item.cover_art_url }} style={styles.albumCover} />
+            ) : (
+              <View style={styles.albumCoverPlaceholder}>
+                <Ionicons name="disc-outline" size={40} color="#666" />
+              </View>
+            )}
+            <View style={styles.albumInfo}>
+              <Text style={styles.albumTitle} numberOfLines={1}>
+                {item.album_title}
+              </Text>
+              <Text style={styles.artist} numberOfLines={1}>
+                {item.artist}
+              </Text>
+              {renderStars(item.rating)}
+            </View>
+          </View>
+
+          {item.review_text && (
+            <Text style={styles.reviewText} numberOfLines={3}>
+              {item.review_text}
+            </Text>
+          )}
+        </TouchableOpacity>
 
         <View style={styles.feedFooter}>
-          <TouchableOpacity style={styles.likeButton}>
-            <Ionicons name="heart-outline" size={20} color="#666" />
-            <Text style={styles.likeCount}>{item.likes_count}</Text>
+          <TouchableOpacity
+            style={styles.likeButton}
+            onPress={() => handleLike(item.log_id)}
+            disabled={likingLogId === item.log_id}
+          >
+            <Ionicons
+              name={item.is_liked ? 'heart' : 'heart-outline'}
+              size={20}
+              color={item.is_liked ? '#e74c3c' : '#666'}
+            />
+            <Text style={[styles.likeCount, item.is_liked && { color: '#e74c3c' }]}>{item.likes_count}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.commentButton}>
+          <TouchableOpacity
+            style={styles.commentButton}
+            onPress={() => navigation.navigate('LogDetail', { logId: item.log_id })}
+          >
             <Ionicons name="chatbubble-outline" size={20} color="#666" />
+            <Text style={styles.commentCount}>{item.comments_count}</Text>
           </TouchableOpacity>
         </View>
-      </TouchableOpacity>
+      </View>
+    );
+  };
+
+  const renderTopReviewed = () => {
+    if (topReviewed.length === 0) return null;
+    return (
+      <View style={styles.topReviewedSection}>
+        <Text style={styles.topReviewedTitle}>Most reviewed</Text>
+        <View style={styles.topReviewedRow}>
+          {topReviewed.map((album) => (
+            <TouchableOpacity
+              key={album.album_id}
+              style={styles.topReviewedItem}
+              onPress={() => navigation.navigate('AlbumDetail', { albumId: album.album_id })}
+            >
+              {album.cover_art_url ? (
+                <Image source={{ uri: album.cover_art_url }} style={styles.topReviewedCover} />
+              ) : (
+                <View style={styles.topReviewedCoverPlaceholder}>
+                  <Ionicons name="disc-outline" size={28} color="#666" />
+                </View>
+              )}
+              <Text style={styles.topReviewedAlbumTitle} numberOfLines={1}>
+                {album.title}
+              </Text>
+              <Text style={styles.topReviewedCount}>{album.review_count} reviews</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
     );
   };
 
@@ -278,6 +411,7 @@ export default function HomeScreen({ navigation }: any) {
           data={feed}
           renderItem={renderFeedItem}
           keyExtractor={(item) => item.log_id}
+          ListHeaderComponent={renderTopReviewed()}
           contentContainerStyle={styles.feedList}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -342,6 +476,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 12,
+  },
+  feedHeaderTouchable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
   avatar: {
     width: 40,
@@ -421,10 +560,64 @@ const styles = StyleSheet.create({
   likeCount: {
     marginLeft: 6,
     fontSize: 14,
-    color: '#666',
+    fontWeight: '600',
+    color: '#999',
+    minWidth: 18,
   },
   commentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 4,
+  },
+  commentCount: {
+    marginLeft: 6,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#999',
+    minWidth: 18,
+  },
+  topReviewedSection: {
+    padding: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+  },
+  topReviewedTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#999',
+    marginBottom: 12,
+  },
+  topReviewedRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  topReviewedItem: {
+    width: 100,
+    alignItems: 'center',
+  },
+  topReviewedCover: {
+    width: 100,
+    height: 100,
+    borderRadius: 4,
+  },
+  topReviewedCoverPlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 4,
+    backgroundColor: '#1a1a1a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  topReviewedAlbumTitle: {
+    fontSize: 12,
+    color: '#fff',
+    marginTop: 6,
+  },
+  topReviewedCount: {
+    fontSize: 11,
+    color: '#666',
+    marginTop: 2,
   },
   emptyState: {
     flex: 1,

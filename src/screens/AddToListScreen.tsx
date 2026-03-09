@@ -7,11 +7,12 @@ import {
   FlatList,
   TouchableOpacity,
   TextInput,
+  Image,
   ActivityIndicator,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { musicBrainzService } from '../services/musicbrainz';
+import { spotifyService } from '../services/spotify';
 import { supabase } from '../services/supabase';
 
 export default function AddToListScreen({ route, navigation }: any) {
@@ -29,7 +30,7 @@ export default function AddToListScreen({ route, navigation }: any) {
     setHasSearched(true);
 
     try {
-      const searchResults = await musicBrainzService.searchAlbums(searchQuery, 20);
+      const searchResults = await spotifyService.searchAlbums(searchQuery, 20);
       setResults(searchResults);
     } catch (error) {
       console.error('Search error:', error);
@@ -43,7 +44,7 @@ export default function AddToListScreen({ route, navigation }: any) {
 
     try {
       // Cache album in Supabase first
-      const album = await musicBrainzService.getOrCacheAlbum(result.id);
+      const album = await spotifyService.getOrCacheAlbum(result.id);
       
       if (!album) throw new Error('Failed to load album');
 
@@ -93,9 +94,13 @@ export default function AddToListScreen({ route, navigation }: any) {
 
     return (
       <View style={styles.albumItem}>
-        <View style={styles.coverPlaceholder}>
-          <Ionicons name="disc-outline" size={40} color="#666" />
-        </View>
+        {item.coverArtUrl ? (
+          <Image source={{ uri: item.coverArtUrl }} style={styles.coverImage} />
+        ) : (
+          <View style={styles.coverPlaceholder}>
+            <Ionicons name="disc-outline" size={40} color="#666" />
+          </View>
+        )}
         <View style={styles.info}>
           <Text style={styles.title} numberOfLines={2}>
             {item.title}
@@ -254,6 +259,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#111',
     borderRadius: 8,
     marginBottom: 8,
+  },
+  coverImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 4,
   },
   coverPlaceholder: {
     width: 60,

@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { musicBrainzService } from '../services/musicbrainz';
+import { spotifyService } from '../services/spotify';
 
 export default function SelectFavoriteAlbumScreen({ route, navigation }: any) {
   const { position, usedArtists = [], onSelect } = route.params;
@@ -27,7 +27,7 @@ export default function SelectFavoriteAlbumScreen({ route, navigation }: any) {
     setHasSearched(true);
 
     try {
-      const searchResults = await musicBrainzService.searchAlbums(searchQuery, 20);
+      const searchResults = await spotifyService.searchAlbums(searchQuery, 20);
       
       // Filter out artists already in favorites
       const filtered = searchResults.filter(
@@ -44,7 +44,7 @@ export default function SelectFavoriteAlbumScreen({ route, navigation }: any) {
 
   const handleSelectAlbum = async (result: any) => {
     // Cache album in Supabase first
-    const album = await musicBrainzService.getOrCacheAlbum(result.id);
+    const album = await spotifyService.getOrCacheAlbum(result.id);
     
     if (album) {
       onSelect({
@@ -62,9 +62,13 @@ export default function SelectFavoriteAlbumScreen({ route, navigation }: any) {
       style={styles.albumItem}
       onPress={() => handleSelectAlbum(item)}
     >
-      <View style={styles.coverPlaceholder}>
-        <Ionicons name="disc-outline" size={40} color="#666" />
-      </View>
+      {item.coverArtUrl ? (
+        <Image source={{ uri: item.coverArtUrl }} style={styles.coverImage} />
+      ) : (
+        <View style={styles.coverPlaceholder}>
+          <Ionicons name="disc-outline" size={40} color="#666" />
+        </View>
+      )}
       <View style={styles.info}>
         <Text style={styles.title} numberOfLines={2}>
           {item.title}
@@ -213,6 +217,11 @@ const styles = StyleSheet.create({
     borderBottomColor: '#222',
   },
   cover: {
+    width: 60,
+    height: 60,
+    borderRadius: 4,
+  },
+  coverImage: {
     width: 60,
     height: 60,
     borderRadius: 4,

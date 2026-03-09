@@ -82,6 +82,14 @@ export interface ListItem {
   added_at: string;
 }
 
+export interface LogComment {
+  id: string;
+  log_id: string;
+  user_id: string;
+  text: string;
+  created_at: string;
+}
+
 // Helper functions for common operations
 
 export const authService = {
@@ -369,5 +377,109 @@ export const socialService = {
     
     if (error) throw error;
     return data;
+  },
+};
+
+export const logCommentService = {
+  getCommentsForLog: async (logId: string) => {
+    const { data, error } = await supabase
+      .from('log_comments')
+      .select('id, log_id, user_id, text, created_at')
+      .eq('log_id', logId)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    return data ?? [];
+  },
+
+  getCommentCountsForLogs: async (logIds: string[]): Promise<Record<string, number>> => {
+    if (logIds.length === 0) return {};
+    const { data, error } = await supabase
+      .from('log_comments')
+      .select('log_id')
+      .in('log_id', logIds);
+
+    if (error) throw error;
+
+    const counts: Record<string, number> = {};
+    logIds.forEach((id) => { counts[id] = 0; });
+    (data ?? []).forEach((row: { log_id: string }) => {
+      counts[row.log_id] = (counts[row.log_id] ?? 0) + 1;
+    });
+    return counts;
+  },
+
+  addComment: async (logId: string, text: string): Promise<LogComment> => {
+    const user = await authService.getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data, error } = await supabase
+      .from('log_comments')
+      .insert([{ log_id: logId, user_id: user.id, text: text.trim() }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data as LogComment;
+  },
+};
+
+export const logLikeService = {
+  getLikeCountsForLogs: async (logIds: string[]): Promise<Record<string, number>> => {
+    if (logIds.length === 0) return {};
+    const { data, error } = await supabase
+      .from('log_likes')
+      .select('log_id')
+      .in('log_id', logIds);
+    if (error) throw error;
+    const counts: Record<string, number> = {};
+    logIds.forEach((id) => { counts[id] = 0; });
+    (data ?? []).forEach((row: { log_id: string }) => {
+      counts[row.log_id] = (counts[row.log_id] ?? 0) + 1;
+    });
+    return counts;
+  },
+
+  getLogIdsLikedByUser: async (logIds: string[]): Promise<Set<string>> => {
+    const user = await authService.getCurrentUser();
+    if (!user || logIds.length === 0) return new Set();
+    const { data } = await supabase
+      .from('log_likes')
+      .select('log_id')
+      .eq('user_id', user.id)
+      .in('log_id', logIds);
+    return new Set((data ?? []).map((row: { log_id: string }) => row.log_id));
+  },
+
+  isLikedByUser: async (logId: string): Promise<boolean> => {
+    const user = await authService.getCurrentUser();
+    if (!user) return false;
+    const { data } = await supabase
+      .from('log_likes')
+      .select('id')
+      .eq('log_id', logId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    return !!data;
+  },
+
+  toggleLike: async (logId: string): Promise<{ liked: boolean; count: number }> => {
+    const user = await authService.getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
+    const existing = await supabase
+      .from('log_likes')
+      .select('id')
+      .eq('log_id', logId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (existing.data) {
+      await supabase.from('log_likes').delete().eq('log_id', logId).eq('user_id', user.id);
+      const { count } = await supabase.from('log_likes').select('*', { count: 'exact', head: true }).eq('log_id', logId);
+      return { liked: false, count: count ?? 0 };
+    } else {
+      await supabase.from('log_likes').insert([{ log_id: logId, user_id: user.id }]);
+      const { count } = await supabase.from('log_likes').select('*', { count: 'exact', head: true }).eq('log_id', logId);
+      return { liked: true, count: count ?? 1 };
+    }
   },
 };
