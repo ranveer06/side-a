@@ -10,7 +10,7 @@ import {
   Alert,
   ScrollView,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase, trackLogService } from '../services/supabase';
 import { spotifyService, type SpotifyTrackSearchResult } from '../services/spotify';
 import RemoteImage from '../components/RemoteImage';

@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { spotifyService, type SpotifySearchResult } from '../services/spotify';
 import RemoteImage from '../components/RemoteImage';
 

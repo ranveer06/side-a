@@ -10,8 +10,8 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { supabase, profileService } from '../services/supabase';
 import RemoteImage from '../components/RemoteImage';
 
@@ -49,23 +49,13 @@ export default function EditProfileScreen({ navigation }: any) {
   };
 
   const pickImage = async () => {
-    // Request permission
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Please allow access to your photos to upload a profile picture.');
-      return;
-    }
-
-    // Pick image
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
+    const result = await launchImageLibrary({
+      mediaType: 'photo',
+      selectionLimit: 1,
       quality: 0.5,
     });
 
-    if (!result.canceled && result.assets[0]) {
+    if (!result.didCancel && result.assets?.[0]?.uri) {
       uploadImage(result.assets[0].uri);
     }
   };

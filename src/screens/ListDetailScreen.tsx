@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../services/supabase';
 import RemoteImage from '../components/RemoteImage';
 import AlbumCover from '../components/AlbumCover';

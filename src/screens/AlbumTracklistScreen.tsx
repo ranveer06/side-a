@@ -11,7 +11,7 @@ import {
   Alert,
   Keyboard,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase, trackLogService } from '../services/supabase';
 import { spotifyService, type SpotifyTrack } from '../services/spotify';
 

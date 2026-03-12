@@ -11,7 +11,7 @@ import {
   ActivityIndicator,
   Switch,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { supabase } from '../services/supabase';
 
 export default function CreateListScreen({ navigation }: any) {

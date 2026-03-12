@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { supabase, logCommentService, logLikeService } from '../services/supabase';
 import { spotifyService } from '../services/spotify';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import RemoteImage from '../components/RemoteImage';
 import AlbumCover from '../components/AlbumCover';
 import { formatAlbumDescription } from '../utils/albumDescription';

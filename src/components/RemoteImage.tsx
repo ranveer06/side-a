@@ -2,7 +2,7 @@
 // style.width/height are undefined → was producing NaN icon size and broken UI.
 import React, { useState, useCallback, useMemo } from 'react';
 import { View, Image, ImageStyle, ViewStyle, StyleSheet } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 
 type PlaceholderIcon = 'disc-outline' | 'person' | 'person-circle-outline';
 

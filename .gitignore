@@ -37,3 +37,6 @@ yarn-error.*
 *.tsbuildinfo
 
 # generated native folders
+
+# one-time RN template (iOS was copied to ios/; not a submodule)
+RNBase/
