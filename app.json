@@ -38,6 +38,12 @@
         "projectId": "e2fc1dec-5019-4167-bf26-59e2a84d3715"
       }
     },
-    "owner": "ranveer06"
+    "owner": "ranveer06",
+    "android": {
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.ronny.sidea"
+    }
   }
 }

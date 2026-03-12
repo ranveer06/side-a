@@ -6,12 +6,13 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   Alert,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, albumLogService } from '../services/supabase';
+import RemoteImage from '../components/RemoteImage';
+import AlbumCover from '../components/AlbumCover';
 
 interface Favorite {
   position: number;
@@ -20,6 +21,7 @@ interface Favorite {
     title: string;
     artist: string;
     cover_art_url?: string;
+    musicbrainz_id?: string | null;
   } | null;
 }
 
@@ -51,7 +53,8 @@ export default function ManageFavoritesScreen({ navigation }: any) {
             id,
             title,
             artist,
-            cover_art_url
+            cover_art_url,
+            musicbrainz_id
           )
         `)
         .eq('user_id', user.id)
@@ -169,16 +172,13 @@ export default function ManageFavoritesScreen({ navigation }: any) {
           style={styles.albumCard}
           onPress={() => handleSelectAlbum(item.position)}
         >
-          {item.album.cover_art_url ? (
-            <Image
-              source={{ uri: item.album.cover_art_url }}
-              style={styles.albumCover}
-            />
-          ) : (
-            <View style={styles.albumCoverPlaceholder}>
-              <Ionicons name="disc-outline" size={40} color="#666" />
-            </View>
-          )}
+          <AlbumCover
+            coverArtUrl={item.album.cover_art_url}
+            albumId={item.album.id}
+            title={item.album.title}
+            artist={item.album.artist}
+            style={styles.albumCover}
+          />
           <View style={styles.albumInfo}>
             <Text style={styles.albumTitle} numberOfLines={2}>
               {item.album.title}

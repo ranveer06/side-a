@@ -7,12 +7,13 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  Image,
   Alert,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, albumLogService } from '../services/supabase';
+import RemoteImage from '../components/RemoteImage';
+import AlbumCover from '../components/AlbumCover';
 
 export default function LogModalScreen({ route, navigation }: any) {
   const { album, albumId } = route.params || {};
@@ -150,13 +151,13 @@ export default function LogModalScreen({ route, navigation }: any) {
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       {/* Album Info */}
       <View style={styles.albumInfo}>
-        {albumData.cover_art_url ? (
-          <Image source={{ uri: albumData.cover_art_url }} style={styles.coverArt} />
-        ) : (
-          <View style={styles.coverPlaceholder}>
-            <Ionicons name="disc-outline" size={60} color="#666" />
-          </View>
-        )}
+        <AlbumCover
+          coverArtUrl={albumData.cover_art_url}
+          albumId={albumData.id}
+          title={albumData.title}
+          artist={albumData.artist}
+          style={styles.coverArt}
+        />
         <View style={styles.albumText}>
           <Text style={styles.albumTitle}>{albumData.title}</Text>
           <Text style={styles.albumArtist}>{albumData.artist}</Text>

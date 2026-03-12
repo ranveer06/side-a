@@ -199,6 +199,75 @@ export const musicBrainzService = {
   },
 
   /**
+   * Fetch cover art URL from Cover Art Archive for a release-group MBID only (no MB delay if mbid known).
+   */
+  getCoverArtUrlForReleaseGroup: async (releaseGroupMbid: string): Promise<string | null> => {
+    try {
+      await delay();
+      const coverResponse = await axios.get(`${COVERART_API}/release-group/${releaseGroupMbid}`, {
+        headers: { 'User-Agent': 'SideA/1.0.0 (contact@sidea.app)' },
+        validateStatus: (s) => s === 200 || s === 404,
+      });
+      if (coverResponse.status === 404) return null;
+      const images = coverResponse.data?.images || [];
+      if (images.length === 0) return null;
+      const frontCover = images.find((img: any) => img.front === true) || images[0];
+      // CAA returns full URLs in image, or thumbnails.large
+      const url =
+        frontCover?.image ||
+        frontCover?.thumbnails?.large ||
+        frontCover?.thumbnails?.small;
+      if (typeof url !== 'string' || !url.startsWith('http')) return null;
+      return url;
+    } catch (_) {
+      return null;
+    }
+  },
+
+  /**
+   * Search MusicBrainz by title + artist, then get cover from Cover Art Archive.
+   * Use when Spotify returns no album image (common on TestFlight / some releases).
+   */
+  getCoverArtUrlByTitleArtist: async (title: string, artist: string): Promise<string | null> => {
+    const q = [title, artist].filter(Boolean).join(' ').trim();
+    if (!q) return null;
+    try {
+      await delay();
+      const response = await axios.get(`${MUSICBRAINZ_API}/release-group`, {
+        params: {
+          query: `release:"${title}" AND artist:"${artist}"`,
+          limit: 3,
+          fmt: 'json',
+        },
+        headers: { 'User-Agent': 'SideA/1.0.0 (contact@sidea.app)' },
+      });
+      const results = response.data['release-groups'] || [];
+      for (const rg of results) {
+        const mbid = rg.id;
+        if (!mbid) continue;
+        const url = await musicBrainzService.getCoverArtUrlForReleaseGroup(mbid);
+        if (url) return url;
+      }
+      // Broader search if strict query returned nothing
+      if (results.length === 0) {
+        await delay();
+        const response2 = await axios.get(`${MUSICBRAINZ_API}/release-group`, {
+          params: { query: q, limit: 3, fmt: 'json' },
+          headers: { 'User-Agent': 'SideA/1.0.0 (contact@sidea.app)' },
+        });
+        const results2 = response2.data['release-groups'] || [];
+        for (const rg of results2) {
+          const url = await musicBrainzService.getCoverArtUrlForReleaseGroup(rg.id);
+          if (url) return url;
+        }
+      }
+    } catch (e) {
+      console.warn('MusicBrainz cover fallback error:', e);
+    }
+    return null;
+  },
+
+  /**
    * Search for albums by artist
    */
   searchByArtist: async (artistName: string, limit = 20): Promise<SearchResult[]> => {

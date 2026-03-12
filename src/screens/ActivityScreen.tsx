@@ -6,12 +6,13 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabase';
+import RemoteImage from '../components/RemoteImage';
+import AlbumCover from '../components/AlbumCover';
 
 type ActivityType = 'log' | 'like' | 'comment' | 'collection';
 
@@ -28,6 +29,7 @@ interface ActivityItem {
   album_title?: string;
   artist?: string;
   cover_art_url?: string | null;
+  musicbrainz_id?: string | null;
   rating?: number | null;
   review_text?: string | null;
   // For like/comment: the log owner and target album
@@ -73,7 +75,10 @@ export default function ActivityScreen({ navigation }: any) {
       const followingIds = new Set((followingData ?? []).map((f: { following_id: string }) => f.following_id));
 
       const profilesMap = new Map<string, { username: string; avatar_url: string | null }>();
-      const albumsMap = new Map<string, { title: string; artist: string; cover_art_url: string | null }>();
+      const albumsMap = new Map<
+        string,
+        { title: string; artist: string; cover_art_url: string | null; musicbrainz_id: string | null }
+      >();
       const logToAlbum = new Map<string, string>();
 
       const ensureProfiles = async (ids: string[]) => {
@@ -85,8 +90,18 @@ export default function ActivityScreen({ navigation }: any) {
       const ensureAlbums = async (ids: string[]) => {
         const missing = ids.filter((id) => !albumsMap.has(id));
         if (missing.length === 0) return;
-        const { data } = await supabase.from('albums').select('id, title, artist, cover_art_url').in('id', missing);
-        (data ?? []).forEach((a: any) => albumsMap.set(a.id, { title: a.title, artist: a.artist, cover_art_url: a.cover_art_url }));
+        const { data } = await supabase
+          .from('albums')
+          .select('id, title, artist, cover_art_url, musicbrainz_id')
+          .in('id', missing);
+        (data ?? []).forEach((a: any) =>
+          albumsMap.set(a.id, {
+            title: a.title,
+            artist: a.artist,
+            cover_art_url: a.cover_art_url,
+            musicbrainz_id: a.musicbrainz_id ?? null,
+          })
+        );
       };
 
       const items: ActivityItem[] = [];
@@ -117,6 +132,7 @@ export default function ActivityScreen({ navigation }: any) {
           album_title: album?.title,
           artist: album?.artist,
           cover_art_url: album?.cover_art_url,
+          musicbrainz_id: album?.musicbrainz_id,
           rating: l.rating,
           review_text: l.review_text,
         });
@@ -156,6 +172,7 @@ export default function ActivityScreen({ navigation }: any) {
             album_title: album?.title,
             artist: album?.artist,
             cover_art_url: album?.cover_art_url,
+            musicbrainz_id: album?.musicbrainz_id,
           });
         });
       }
@@ -195,6 +212,7 @@ export default function ActivityScreen({ navigation }: any) {
             album_title: album?.title,
             artist: album?.artist,
             cover_art_url: album?.cover_art_url,
+            musicbrainz_id: album?.musicbrainz_id,
           });
         });
       }
@@ -224,6 +242,7 @@ export default function ActivityScreen({ navigation }: any) {
             album_title: album?.title,
             artist: album?.artist,
             cover_art_url: album?.cover_art_url,
+            musicbrainz_id: album?.musicbrainz_id,
             format: c.format,
           });
         });
@@ -293,13 +312,7 @@ export default function ActivityScreen({ navigation }: any) {
       activeOpacity={0.8}
     >
       <View style={styles.cardHeader}>
-        {item.avatar_url ? (
-          <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
-        ) : (
-          <View style={styles.avatarPlaceholder}>
-            <Ionicons name="person-circle-outline" size={36} color="#666" />
-          </View>
-        )}
+        <RemoteImage uri={item.avatar_url} style={styles.avatar} placeholderIcon="person-circle-outline" />
         <View style={styles.cardHeaderText}>
           <Text style={styles.cardUsername}>
             {item.user_id === currentUserId ? 'You' : `@${item.username}`}
@@ -310,13 +323,13 @@ export default function ActivityScreen({ navigation }: any) {
       </View>
       {(item.album_title || item.cover_art_url) && (
         <View style={styles.albumRow}>
-          {item.cover_art_url ? (
-            <Image source={{ uri: item.cover_art_url }} style={styles.cover} />
-          ) : (
-            <View style={styles.coverPlaceholder}>
-              <Ionicons name="disc-outline" size={32} color="#666" />
-            </View>
-          )}
+          <AlbumCover
+            coverArtUrl={item.cover_art_url}
+            albumId={item.album_id}
+            title={item.album_title}
+            artist={item.artist}
+            style={styles.cover}
+          />
           <View style={styles.albumInfo}>
             <Text style={styles.albumTitle} numberOfLines={1}>{item.album_title ?? 'Album'}</Text>
             {item.artist && <Text style={styles.artist} numberOfLines={1}>{item.artist}</Text>}

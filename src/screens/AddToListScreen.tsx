@@ -7,16 +7,16 @@ import {
   FlatList,
   TouchableOpacity,
   TextInput,
-  Image,
   ActivityIndicator,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { spotifyService } from '../services/spotify';
 import { supabase } from '../services/supabase';
+import RemoteImage from '../components/RemoteImage';
 
 export default function AddToListScreen({ route, navigation }: any) {
-  const { listId, existingAlbums = [] } = route.params;
+  const { listId, existingAlbums = [] } = route.params ?? {};
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -30,7 +30,7 @@ export default function AddToListScreen({ route, navigation }: any) {
     setHasSearched(true);
 
     try {
-      const searchResults = await spotifyService.searchAlbums(searchQuery, 20);
+      const searchResults = await spotifyService.searchAlbumsWithKeywords(searchQuery, 50);
       setResults(searchResults);
     } catch (error) {
       console.error('Search error:', error);
@@ -40,13 +40,15 @@ export default function AddToListScreen({ route, navigation }: any) {
   };
 
   const handleAddAlbum = async (result: any) => {
+    if (!listId) return;
     setAdding(result.id);
 
     try {
       // Cache album in Supabase first
       const album = await spotifyService.getOrCacheAlbum(result.id);
-      
-      if (!album) throw new Error('Failed to load album');
+      if (!album) {
+        throw new Error('Album couldn’t be loaded. Check your connection and try again.');
+      }
 
       // Check if already in list
       if (existingAlbums.includes(album.id)) {
@@ -94,13 +96,7 @@ export default function AddToListScreen({ route, navigation }: any) {
 
     return (
       <View style={styles.albumItem}>
-        {item.coverArtUrl ? (
-          <Image source={{ uri: item.coverArtUrl }} style={styles.coverImage} />
-        ) : (
-          <View style={styles.coverPlaceholder}>
-            <Ionicons name="disc-outline" size={40} color="#666" />
-          </View>
-        )}
+        <RemoteImage uri={item.coverArtUrl} style={styles.coverImage} />
         <View style={styles.info}>
           <Text style={styles.title} numberOfLines={2}>
             {item.title}
@@ -132,6 +128,24 @@ export default function AddToListScreen({ route, navigation }: any) {
       </View>
     );
   };
+
+  if (!listId) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.centerContainer}>
+          <Text style={styles.errorText}>List not found</Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Text style={styles.backButtonText}>Go back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -197,6 +211,28 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#999',
+    marginBottom: 16,
+  },
+  backButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#333',
+    borderRadius: 8,
+  },
+  backButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
   },
   header: {
     flexDirection: 'row',

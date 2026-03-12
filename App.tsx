@@ -1,5 +1,6 @@
 // App.tsx - COMPLETE WITH FAVORITES AND LISTS
 import React, { useEffect, useState } from 'react';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -15,6 +16,7 @@ import ActivityScreen from './src/screens/ActivityScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import PublicListsScreen from './src/screens/PublicListsScreen';
 import AlbumDetailScreen from './src/screens/AlbumDetailScreen';
+import AlbumTracklistScreen from './src/screens/AlbumTracklistScreen';
 import LogModalScreen from './src/screens/LogModalScreen';
 import FindUsersScreen from './src/screens/FindUsersScreen';
 import EditProfileScreen from './src/screens/EditProfileScreen';
@@ -29,6 +31,8 @@ import LogCommentsScreen from './src/screens/LogCommentsScreen';
 import LogDetailScreen from './src/screens/LogDetailScreen';
 import UserProfileScreen from './src/screens/UserProfileScreen';
 import ArtistAlbumsScreen from './src/screens/ArtistAlbumsScreen';
+import RateTrackScreen from './src/screens/RateTrackScreen';
+import RecommendationsScreen from './src/screens/RecommendationsScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import SignUpScreen from './src/screens/SignUpScreen';
 
@@ -102,6 +106,15 @@ function AppStack() {
           headerStyle: {
             backgroundColor: '#000',
           },
+          headerTintColor: '#fff',
+        }}
+      />
+      <Stack.Screen 
+        name="AlbumTracklist" 
+        component={AlbumTracklistScreen}
+        options={{ 
+          title: 'Tracklist',
+          headerStyle: { backgroundColor: '#000' },
           headerTintColor: '#fff',
         }}
       />
@@ -191,6 +204,16 @@ function AppStack() {
         component={ArtistAlbumsScreen}
         options={{ headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff' }}
       />
+      <Stack.Screen 
+        name="RateTrack" 
+        component={RateTrackScreen}
+        options={{ title: 'Rate song', headerStyle: { backgroundColor: '#000' }, headerTintColor: '#fff' }}
+      />
+      <Stack.Screen 
+        name="Recommendations" 
+        component={RecommendationsScreen}
+        options={{ headerShown: false }}
+      />
       {/* Log as a modal */}
       <Stack.Screen 
         name="LogModal" 
@@ -251,7 +274,11 @@ export default function App() {
   }, []);
 
   if (loading) {
-    return null;
+    return (
+      <View style={styles.appLoading}>
+        <ActivityIndicator size="large" color="#1DB954" />
+      </View>
+    );
   }
 
   return (
@@ -266,3 +293,12 @@ export default function App() {
     </NavigationContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  appLoading: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});

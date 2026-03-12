@@ -4,7 +4,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
   FlatList,
   TouchableOpacity,
   TextInput,
@@ -15,11 +14,16 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase, logCommentService, logLikeService, albumLogService, type LogComment } from '../services/supabase';
+import { supabase, logCommentService, logLikeService, commentLikeService, albumLogService, trackLogService, type LogComment } from '../services/supabase';
+import RemoteImage from '../components/RemoteImage';
+import AlbumCover from '../components/AlbumCover';
 
 interface CommentWithProfile extends LogComment {
   username?: string;
   avatar_url?: string | null;
+  parent_username?: string | null;
+  likes_count?: number;
+  is_liked?: boolean;
 }
 
 interface LogData {
@@ -34,10 +38,11 @@ interface LogData {
   album_title: string;
   artist: string;
   cover_art_url: string | null;
+  musicbrainz_id?: string | null;
 }
 
 export default function LogDetailScreen({ route, navigation }: any) {
-  const { logId } = route.params;
+  const logId = route.params?.logId;
   const [logData, setLogData] = useState<LogData | null>(null);
   const [comments, setComments] = useState<CommentWithProfile[]>([]);
   const [commentText, setCommentText] = useState('');
@@ -47,6 +52,13 @@ export default function LogDetailScreen({ route, navigation }: any) {
   const [likeCount, setLikeCount] = useState(0);
   const [likeBusy, setLikeBusy] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [trackLogs, setTrackLogs] = useState<any[]>([]);
+  const [showTrackRatings, setShowTrackRatings] = useState(false);
+  const [likeBusyCommentId, setLikeBusyCommentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!logId) setLoading(false);
+  }, [logId]);
 
   const loadLogAndComments = useCallback(async () => {
     if (!logId) return;
@@ -66,7 +78,7 @@ export default function LogDetailScreen({ route, navigation }: any) {
       }
 
       const [albumRes, profileRes, commentsData, likedRes, countRes] = await Promise.all([
-        supabase.from('albums').select('title, artist, cover_art_url').eq('id', log.album_id).single(),
+        supabase.from('albums').select('title, artist, cover_art_url, musicbrainz_id').eq('id', log.album_id).single(),
         supabase.from('profiles').select('username, avatar_url').eq('id', log.user_id).single(),
         logCommentService.getCommentsForLog(logId),
         logLikeService.isLikedByUser(logId),
@@ -83,28 +95,53 @@ export default function LogDetailScreen({ route, navigation }: any) {
         album_title: album?.title ?? 'Unknown Album',
         artist: album?.artist ?? 'Unknown Artist',
         cover_art_url: album?.cover_art_url ?? null,
+        musicbrainz_id: album?.musicbrainz_id ?? null,
       });
 
       setLiked(likedRes);
       setLikeCount((countRes.count ?? 0) as number);
 
-      const userIds = [...new Set((commentsData as LogComment[]).map((c) => c.user_id))];
+      const rawComments = commentsData as (LogComment & { parent_id?: string | null })[];
+      const userIds = [...new Set(rawComments.map((c) => c.user_id))];
+      const parentAuthors = new Map<string, string>();
+      rawComments.forEach((c) => {
+        if (c.parent_id) {
+          const parent = rawComments.find((r) => r.id === c.parent_id);
+          if (parent) parentAuthors.set(c.id, parent.user_id);
+        }
+      });
+      const allUserIds = [...new Set([...userIds, ...Array.from(parentAuthors.values())])];
       let profilesMap: Record<string, { username?: string; avatar_url?: string | null }> = {};
-      if (userIds.length > 0) {
+      if (allUserIds.length > 0) {
         const { data: profiles } = await supabase
           .from('profiles')
           .select('id, username, avatar_url')
-          .in('id', userIds);
+          .in('id', allUserIds);
         profilesMap = Object.fromEntries((profiles ?? []).map((p) => [p.id, { username: p.username, avatar_url: p.avatar_url }]));
       }
 
+      const commentIds = rawComments.map((c) => c.id);
+      const [likeCounts, likedSet] = await Promise.all([
+        commentLikeService.getLikeCountsForComments(commentIds).catch(() => ({})),
+        commentLikeService.getCommentIdsLikedByUser(commentIds).catch(() => new Set<string>()),
+      ]);
+
       setComments(
-        (commentsData as LogComment[]).map((c) => ({
-          ...c,
-          username: profilesMap[c.user_id]?.username,
-          avatar_url: profilesMap[c.user_id]?.avatar_url,
-        }))
+        rawComments.map((c) => {
+          const parentComment = c.parent_id ? rawComments.find((r) => r.id === c.parent_id) : null;
+          return {
+            ...c,
+            username: profilesMap[c.user_id]?.username,
+            avatar_url: profilesMap[c.user_id]?.avatar_url,
+            parent_username: parentComment ? profilesMap[parentComment.user_id]?.username ?? null : null,
+            likes_count: likeCounts[c.id] ?? 0,
+            is_liked: likedSet.has(c.id),
+          };
+        })
       );
+
+      const trackLogList = await trackLogService.getForUserAlbum(log.user_id, log.album_id).catch(() => []);
+      setTrackLogs(trackLogList.filter((tl: any) => tl.rating != null || (tl.review_text && tl.review_text.trim())));
     } catch (e) {
       console.error('Error loading log detail:', e);
     } finally {
@@ -200,26 +237,56 @@ export default function LogDetailScreen({ route, navigation }: any) {
     );
   };
 
+  const handleCommentLike = async (commentId: string) => {
+    if (likeBusyCommentId) return;
+    setLikeBusyCommentId(commentId);
+    try {
+      const result = await commentLikeService.toggleLike(commentId);
+      setComments((prev) =>
+        prev.map((c) => (c.id === commentId ? { ...c, is_liked: result.liked, likes_count: result.count } : c))
+      );
+    } catch (_) {}
+    setLikeBusyCommentId(null);
+  };
+
   const renderComment = ({ item }: { item: CommentWithProfile }) => (
-    <View style={styles.commentRow}>
+    <View style={[styles.commentRow, item.parent_id && styles.commentRowReply]}>
       <View style={styles.commentAvatar}>
-        {item.avatar_url ? (
-          <Image source={{ uri: item.avatar_url }} style={styles.commentAvatarImg} />
-        ) : (
-          <Ionicons name="person-circle-outline" size={36} color="#666" />
-        )}
+        <RemoteImage uri={item.avatar_url} style={styles.commentAvatarImg} placeholderIcon="person-circle-outline" />
       </View>
       <View style={styles.commentBody}>
-        <Text style={styles.commentUsername}>@{item.username ?? 'unknown'}</Text>
+        <View style={styles.commentHeaderRow}>
+          <Text style={styles.commentUsername}>@{item.username ?? 'unknown'}</Text>
+          {item.parent_id && item.parent_username && (
+            <Text style={styles.commentReplyTo}> · reply to @{item.parent_username}</Text>
+          )}
+        </View>
         <Text style={styles.commentText}>{item.text}</Text>
-        <Text style={styles.commentTime}>
-          {new Date(item.created_at).toLocaleDateString(undefined, {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </Text>
+        <View style={styles.commentActionsRow}>
+          <Text style={styles.commentTime}>
+            {new Date(item.created_at).toLocaleDateString(undefined, {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </Text>
+          <TouchableOpacity
+            style={styles.commentLikeBtn}
+            onPress={() => handleCommentLike(item.id)}
+            disabled={likeBusyCommentId === item.id}
+          >
+            <Ionicons name={item.is_liked ? 'heart' : 'heart-outline'} size={16} color={item.is_liked ? '#e74c3c' : '#666'} />
+            <Text style={[styles.commentLikeCount, item.is_liked && styles.commentLikeCountActive]}>{item.likes_count ?? 0}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.commentReplyBtn}
+            onPress={() => navigation.navigate('LogComments', { logId, replyingToCommentId: item.id, replyingToUsername: item.username })}
+          >
+            <Ionicons name="arrow-undo-outline" size={14} color="#666" />
+            <Text style={styles.commentReplyText}>Reply</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -232,10 +299,13 @@ export default function LogDetailScreen({ route, navigation }: any) {
     );
   }
 
-  if (!logData) {
+  if (!logId || !logData) {
     return (
       <View style={styles.centerContainer}>
         <Text style={styles.errorText}>Review not found</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.backButtonText}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -246,13 +316,7 @@ export default function LogDetailScreen({ route, navigation }: any) {
         style={styles.logHeader}
         onPress={() => navigation.navigate('UserProfile', { userId: logData.user_id })}
       >
-        {logData.avatar_url ? (
-          <Image source={{ uri: logData.avatar_url }} style={styles.logAvatar} />
-        ) : (
-          <View style={styles.logAvatarPlaceholder}>
-            <Ionicons name="person-circle-outline" size={40} color="#666" />
-          </View>
-        )}
+        <RemoteImage uri={logData.avatar_url} style={styles.logAvatar} placeholderIcon="person-circle-outline" />
         <View style={styles.logHeaderText}>
           <Text style={styles.logUsername}>@{logData.username}</Text>
           <Text style={styles.logMeta}>logged this album</Text>
@@ -264,13 +328,13 @@ export default function LogDetailScreen({ route, navigation }: any) {
         style={styles.logAlbumRow}
         onPress={() => navigation.navigate('AlbumDetail', { albumId: logData.album_id })}
       >
-        {logData.cover_art_url ? (
-          <Image source={{ uri: logData.cover_art_url }} style={styles.logCover} />
-        ) : (
-          <View style={styles.logCoverPlaceholder}>
-            <Ionicons name="disc-outline" size={40} color="#666" />
-          </View>
-        )}
+        <AlbumCover
+          coverArtUrl={logData.cover_art_url}
+          albumId={logData.album_id}
+          title={logData.album_title}
+          artist={logData.artist}
+          style={styles.logCover}
+        />
         <View style={styles.logAlbumInfo}>
           <Text style={styles.logAlbumTitle}>{logData.album_title}</Text>
           <Text style={styles.logArtist}>{logData.artist}</Text>
@@ -283,6 +347,39 @@ export default function LogDetailScreen({ route, navigation }: any) {
         <Text style={styles.logReview}>{logData.review_text}</Text>
       ) : (
         <Text style={styles.logReviewMuted}>No review text</Text>
+      )}
+
+      {trackLogs.length > 0 && (
+        <View style={styles.trackRatingsBlock}>
+          <TouchableOpacity
+            style={styles.trackRatingsHeader}
+            onPress={() => setShowTrackRatings((v) => !v)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.trackRatingsTitle}>
+              Track ratings ({trackLogs.length})
+            </Text>
+            <Ionicons name={showTrackRatings ? 'chevron-up' : 'chevron-down'} size={22} color="#999" />
+          </TouchableOpacity>
+          {showTrackRatings && (
+            <View style={styles.trackRatingsList}>
+              {trackLogs
+                .sort((a: any, b: any) => a.track_number - b.track_number)
+                .map((tl: any) => (
+                  <View key={tl.id} style={styles.trackRatingItem}>
+                    <View style={styles.trackRatingRow}>
+                      <Text style={styles.trackRatingNum}>{tl.track_number}.</Text>
+                      <Text style={styles.trackRatingName} numberOfLines={1}>{tl.track_name || 'Track'}</Text>
+                      {renderStars(tl.rating)}
+                    </View>
+                    {tl.review_text && tl.review_text.trim() ? (
+                      <Text style={styles.trackRatingNote} numberOfLines={3}>{tl.review_text.trim()}</Text>
+                    ) : null}
+                  </View>
+                ))}
+            </View>
+          )}
+        </View>
       )}
 
       <View style={styles.actionsRow}>
@@ -344,6 +441,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' },
   errorText: { color: '#999', fontSize: 16 },
+  backButton: { marginTop: 24, paddingVertical: 12, paddingHorizontal: 24, backgroundColor: '#333', borderRadius: 8 },
+  backButtonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   listContent: { paddingBottom: 24 },
   logCard: {
     backgroundColor: '#111',
@@ -375,13 +474,31 @@ const styles = StyleSheet.create({
   likeCountTextActive: { color: '#e74c3c' },
   commentsCountBar: { flexDirection: 'row', alignItems: 'center' },
   commentsCountText: { marginLeft: 6, fontSize: 14, color: '#666' },
+  trackRatingsBlock: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#222' },
+  trackRatingsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  trackRatingsTitle: { fontSize: 15, fontWeight: '600', color: '#fff' },
+  trackRatingsList: { marginTop: 10 },
+  trackRatingItem: { marginBottom: 12 },
+  trackRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  trackRatingNum: { fontSize: 13, color: '#666', minWidth: 20 },
+  trackRatingName: { flex: 1, fontSize: 14, color: '#ddd' },
+  trackRatingNote: { fontSize: 13, color: '#999', marginTop: 4, marginLeft: 28 },
   commentRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#1a1a1a' },
+  commentRowReply: { marginLeft: 24, borderLeftWidth: 2, borderLeftColor: '#333', paddingLeft: 12 },
+  commentHeaderRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
+  commentReplyTo: { fontSize: 11, color: '#666', marginLeft: 4 },
+  commentActionsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 12 },
+  commentLikeBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  commentLikeCount: { fontSize: 11, color: '#666' },
+  commentLikeCountActive: { color: '#e74c3c' },
+  commentReplyBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  commentReplyText: { fontSize: 11, color: '#666' },
   commentAvatar: { marginRight: 12 },
   commentAvatarImg: { width: 36, height: 36, borderRadius: 18 },
   commentBody: { flex: 1 },
   commentUsername: { fontSize: 13, fontWeight: '600', color: '#fff', marginBottom: 2 },
   commentText: { fontSize: 14, color: '#ddd', lineHeight: 20 },
-  commentTime: { fontSize: 11, color: '#666', marginTop: 4 },
+  commentTime: { fontSize: 11, color: '#666' },
   emptyComments: { padding: 24, alignItems: 'center' },
   emptyCommentsText: { color: '#666', fontSize: 14 },
   inputRow: {

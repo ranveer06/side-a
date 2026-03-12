@@ -36,6 +36,7 @@ export interface Album {
   release_date?: string;
   cover_art_url?: string;
   total_tracks?: number;
+  genre?: string | null;
   created_at: string;
 }
 
@@ -88,6 +89,7 @@ export interface LogComment {
   user_id: string;
   text: string;
   created_at: string;
+  parent_id?: string | null;
 }
 
 // Helper functions for common operations
@@ -234,6 +236,42 @@ export const albumLogService = {
   },
 };
 
+export const trackLogService = {
+  getForUserAlbum: async (userId: string, albumId: string) => {
+    const { data, error } = await supabase
+      .from('track_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('album_id', albumId)
+      .order('track_number');
+    if (error) throw error;
+    return data ?? [];
+  },
+  upsert: async (row: {
+    user_id: string;
+    album_id: string;
+    album_log_id?: string | null;
+    track_number: number;
+    track_name?: string | null;
+    rating?: number | null;
+    review_text?: string | null;
+  }) => {
+    const { data, error } = await supabase
+      .from('track_logs')
+      .upsert(
+        {
+          ...row,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id,album_id,track_number' }
+      )
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+};
+
 export const collectionService = {
   addToCollection: async (collection: Omit<Collection, 'id' | 'created_at'>) => {
     const { data, error } = await supabase
@@ -375,12 +413,16 @@ export const socialService = {
   followUser: async (followingId: string) => {
     const user = await authService.getCurrentUser();
     if (!user) throw new Error('Not authenticated');
-    
+    if (followingId === user.id) throw new Error("You can't follow yourself");
+
     const { error } = await supabase
       .from('follows')
       .insert([{ follower_id: user.id, following_id: followingId }]);
-    
-    if (error) throw error;
+
+    if (error) {
+      if ((error as any).code === '23505') return;
+      throw error;
+    }
   },
   
   unfollowUser: async (followingId: string) => {
@@ -448,7 +490,7 @@ export const logCommentService = {
   getCommentsForLog: async (logId: string) => {
     const { data, error } = await supabase
       .from('log_comments')
-      .select('id, log_id, user_id, text, created_at')
+      .select('id, log_id, user_id, text, created_at, parent_id')
       .eq('log_id', logId)
       .order('created_at', { ascending: true });
 
@@ -473,18 +515,73 @@ export const logCommentService = {
     return counts;
   },
 
-  addComment: async (logId: string, text: string): Promise<LogComment> => {
+  addComment: async (logId: string, text: string, parentId?: string | null): Promise<LogComment> => {
     const user = await authService.getCurrentUser();
     if (!user) throw new Error('Not authenticated');
 
+    const row: { log_id: string; user_id: string; text: string; parent_id?: string | null } = {
+      log_id: logId,
+      user_id: user.id,
+      text: text.trim(),
+    };
+    if (parentId) row.parent_id = parentId;
+
     const { data, error } = await supabase
       .from('log_comments')
-      .insert([{ log_id: logId, user_id: user.id, text: text.trim() }])
+      .insert([row])
       .select()
       .single();
 
     if (error) throw error;
     return data as LogComment;
+  },
+};
+
+export const commentLikeService = {
+  getLikeCountsForComments: async (commentIds: string[]): Promise<Record<string, number>> => {
+    if (commentIds.length === 0) return {};
+    const { data, error } = await supabase
+      .from('comment_likes')
+      .select('comment_id')
+      .in('comment_id', commentIds);
+    if (error) throw error;
+    const counts: Record<string, number> = {};
+    commentIds.forEach((id) => { counts[id] = 0; });
+    (data ?? []).forEach((row: { comment_id: string }) => {
+      counts[row.comment_id] = (counts[row.comment_id] ?? 0) + 1;
+    });
+    return counts;
+  },
+
+  getCommentIdsLikedByUser: async (commentIds: string[]): Promise<Set<string>> => {
+    if (commentIds.length === 0) return new Set();
+    const user = await authService.getCurrentUser();
+    if (!user) return new Set();
+    const { data, error } = await supabase
+      .from('comment_likes')
+      .select('comment_id')
+      .eq('user_id', user.id)
+      .in('comment_id', commentIds);
+    if (error) throw error;
+    return new Set((data ?? []).map((r: { comment_id: string }) => r.comment_id));
+  },
+
+  toggleLike: async (commentId: string): Promise<{ liked: boolean; count: number }> => {
+    const user = await authService.getCurrentUser();
+    if (!user) throw new Error('Not authenticated');
+    const { data: existing } = await supabase
+      .from('comment_likes')
+      .select('comment_id')
+      .eq('comment_id', commentId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (existing) {
+      await supabase.from('comment_likes').delete().eq('comment_id', commentId).eq('user_id', user.id);
+    } else {
+      await supabase.from('comment_likes').insert([{ comment_id: commentId, user_id: user.id }]);
+    }
+    const { count } = await supabase.from('comment_likes').select('*', { count: 'exact', head: true }).eq('comment_id', commentId);
+    return { liked: !existing, count: count ?? 0 };
   },
 };
 

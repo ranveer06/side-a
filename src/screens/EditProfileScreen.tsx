@@ -9,11 +9,11 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  Image,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase, profileService } from '../services/supabase';
+import RemoteImage from '../components/RemoteImage';
 
 export default function EditProfileScreen({ navigation }: any) {
   const [username, setUsername] = useState('');
@@ -199,7 +199,7 @@ export default function EditProfileScreen({ navigation }: any) {
             disabled={uploadingImage}
           >
             {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={styles.avatar} />
+              <RemoteImage uri={avatarUrl} style={styles.avatar} placeholderIcon="person-circle-outline" />
             ) : (
               <View style={styles.avatarPlaceholder}>
                 <Ionicons name="person" size={60} color="#666" />

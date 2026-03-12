@@ -6,16 +6,17 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   RefreshControl,
   ActivityIndicator,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabase';
+import RemoteImage from '../components/RemoteImage';
+import AlbumCover from '../components/AlbumCover';
 
 export default function ListDetailScreen({ route, navigation }: any) {
-  const { listId } = route.params;
+  const listId = route.params?.listId;
   const [list, setList] = useState<any>(null);
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -34,6 +35,10 @@ export default function ListDetailScreen({ route, navigation }: any) {
   }, [navigation, listId]);
 
   const loadList = async () => {
+    if (!listId) {
+      setLoading(false);
+      return;
+    }
     try {
       const { data: { user } } = await supabase.auth.getUser();
 
@@ -143,13 +148,13 @@ export default function ListDetailScreen({ route, navigation }: any) {
         style={styles.albumCard}
         onPress={() => navigation.navigate('AlbumDetail', { albumId: item.albums.id })}
       >
-        {item.albums.cover_art_url ? (
-          <Image source={{ uri: item.albums.cover_art_url }} style={styles.cover} />
-        ) : (
-          <View style={styles.coverPlaceholder}>
-            <Ionicons name="disc-outline" size={40} color="#666" />
-          </View>
-        )}
+        <AlbumCover
+          coverArtUrl={item.albums.cover_art_url}
+          albumId={item.albums.id}
+          title={item.albums.title}
+          artist={item.albums.artist}
+          style={styles.cover}
+        />
         <View style={styles.info}>
           <Text style={styles.title} numberOfLines={1}>
             {item.albums.title}
@@ -188,10 +193,13 @@ export default function ListDetailScreen({ route, navigation }: any) {
     );
   }
 
-  if (!list) {
+  if (!listId || !list) {
     return (
       <View style={styles.centerContainer}>
         <Text style={styles.errorText}>List not found</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.backButtonText}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -452,5 +460,17 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 18,
     color: '#999',
+  },
+  backButton: {
+    marginTop: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#333',
+    borderRadius: 8,
+  },
+  backButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });

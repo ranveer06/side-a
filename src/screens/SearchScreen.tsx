@@ -10,20 +10,23 @@ import {
   Image,
   ActivityIndicator,
   Keyboard,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { spotifyService, type SpotifySearchResult, type SpotifyArtistResult } from '../services/spotify';
+import { spotifyService, type SpotifySearchResult, type SpotifyArtistResult, type SpotifyTrackSearchResult } from '../services/spotify';
+import RemoteImage from '../components/RemoteImage';
+import { formatAlbumDescription } from '../utils/albumDescription';
 
 type SearchMode = 'albums' | 'artists';
 
-interface EnrichedSearchResult extends SpotifySearchResult {
-  loading?: boolean;
-}
+type MusicSearchItem =
+  | { type: 'album'; data: SpotifySearchResult }
+  | { type: 'track'; data: SpotifyTrackSearchResult };
 
 export default function SearchScreen({ navigation }: any) {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<SearchMode>('albums');
-  const [results, setResults] = useState<EnrichedSearchResult[]>([]);
+  const [musicResults, setMusicResults] = useState<MusicSearchItem[]>([]);
   const [artistResults, setArtistResults] = useState<SpotifyArtistResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
@@ -37,12 +40,16 @@ export default function SearchScreen({ navigation }: any) {
 
     try {
       if (mode === 'artists') {
-        const artists = await spotifyService.searchArtists(query, 20);
+        const artists = await spotifyService.searchArtists(query, 10);
         setArtistResults(artists);
-        setResults([]);
+        setMusicResults([]);
       } else {
-        const searchResults = await spotifyService.searchAlbums(query, 20);
-        setResults(searchResults.map(r => ({ ...r, loading: false })));
+        const { albums, tracks } = await spotifyService.searchAlbumsAndTracks(query);
+        const items: MusicSearchItem[] = [
+          ...albums.map((a) => ({ type: 'album' as const, data: a })),
+          ...tracks.map((t) => ({ type: 'track' as const, data: t })),
+        ];
+        setMusicResults(items);
         setArtistResults([]);
       }
     } catch (error) {
@@ -52,11 +59,20 @@ export default function SearchScreen({ navigation }: any) {
     }
   };
 
-  const handleAlbumPress = async (result: EnrichedSearchResult) => {
+  const handleAlbumPress = async (result: SpotifySearchResult) => {
     const album = await spotifyService.getOrCacheAlbum(result.id);
     if (album) {
       navigation.navigate('AlbumDetail', { albumId: album.id });
+    } else {
+      Alert.alert(
+        'Couldn’t open album',
+        'Check your connection and try again.'
+      );
     }
+  };
+
+  const handleTrackPress = (track: SpotifyTrackSearchResult) => {
+    navigation.navigate('RateTrack', { track });
   };
 
   const renderArtistResult = ({ item }: { item: SpotifyArtistResult }) => (
@@ -64,13 +80,7 @@ export default function SearchScreen({ navigation }: any) {
       style={styles.resultItem}
       onPress={() => navigation.navigate('ArtistAlbums', { artistId: item.id, artistName: item.name })}
     >
-      {item.imageUrl ? (
-        <Image source={{ uri: item.imageUrl }} style={styles.artistImage} />
-      ) : (
-        <View style={styles.albumPlaceholder}>
-          <Ionicons name="person" size={40} color="#666" />
-        </View>
-      )}
+      <RemoteImage uri={item.imageUrl} style={styles.artistImage} placeholderIcon="person" />
       <View style={styles.resultInfo}>
         <Text style={styles.albumTitle} numberOfLines={1}>{item.name}</Text>
         <Text style={styles.artist}>Artist</Text>
@@ -79,38 +89,48 @@ export default function SearchScreen({ navigation }: any) {
     </TouchableOpacity>
   );
 
-  const renderSearchResult = ({ item }: { item: EnrichedSearchResult }) => (
-    <TouchableOpacity
-      style={styles.resultItem}
-      onPress={() => handleAlbumPress(item)}
-    >
-      {item.coverArtUrl ? (
-        <Image source={{ uri: item.coverArtUrl }} style={styles.albumCover} />
-      ) : item.loading ? (
-        <View style={styles.albumPlaceholder}>
-          <ActivityIndicator size="small" color="#666" />
+  const renderMusicResult = ({ item }: { item: MusicSearchItem }) => {
+    if (item.type === 'album') {
+      const a = item.data;
+      return (
+        <TouchableOpacity
+          style={styles.resultItem}
+          onPress={() => handleAlbumPress(a)}
+        >
+          <RemoteImage uri={a.coverArtUrl} style={styles.albumCover} />
+          <View style={styles.resultInfo}>
+            <Text style={styles.albumTitle} numberOfLines={1}>{a.title}</Text>
+            <Text style={styles.artist} numberOfLines={1}>{a.artist}</Text>
+            {(() => {
+              const { line, vibe } = formatAlbumDescription({ artist: a.artist, release_date: a.date });
+              if (!line && !vibe) return null;
+              return (
+                <Text style={styles.albumMeta} numberOfLines={1}>
+                  {line}{vibe ? ` · ${vibe}` : ''}
+                </Text>
+              );
+            })()}
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#666" />
+        </TouchableOpacity>
+      );
+    }
+    const t = item.data;
+    return (
+      <TouchableOpacity
+        style={styles.resultItem}
+        onPress={() => handleTrackPress(t)}
+      >
+        <RemoteImage uri={t.coverArtUrl} style={styles.albumCover} placeholderIcon="musical-notes" />
+        <View style={styles.resultInfo}>
+          <Text style={styles.albumTitle} numberOfLines={1}>{t.name}</Text>
+          <Text style={styles.artist} numberOfLines={1}>{t.artist}</Text>
+          <Text style={styles.albumMeta} numberOfLines={1}>Song · {t.albumName}</Text>
         </View>
-      ) : (
-        <View style={styles.albumPlaceholder}>
-          <Ionicons name="disc-outline" size={40} color="#666" />
-        </View>
-      )}
-      <View style={styles.resultInfo}>
-        <Text style={styles.albumTitle} numberOfLines={1}>
-          {item.title}
-        </Text>
-        <Text style={styles.artist} numberOfLines={1}>
-          {item.artist}
-        </Text>
-        {item.date && (
-          <Text style={styles.releaseDate}>
-            {new Date(item.date).getFullYear()}
-          </Text>
-        )}
-      </View>
-      <Ionicons name="chevron-forward" size={20} color="#666" />
-    </TouchableOpacity>
-  );
+        <Ionicons name="chevron-forward" size={20} color="#666" />
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -123,7 +143,7 @@ export default function SearchScreen({ navigation }: any) {
           <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
           <TextInput
             style={styles.searchInput}
-            placeholder={mode === 'artists' ? 'Search for artists...' : 'Search for albums...'}
+            placeholder={mode === 'artists' ? 'Search for artists...' : 'Search albums & songs...'}
             placeholderTextColor="#666"
             value={query}
             onChangeText={setQuery}
@@ -169,11 +189,11 @@ export default function SearchScreen({ navigation }: any) {
             {mode === 'artists' ? 'Searching artists...' : 'Searching albums...'}
           </Text>
         </View>
-      ) : hasSearched && mode === 'albums' && results.length === 0 ? (
+      ) : hasSearched && mode === 'albums' && musicResults.length === 0 ? (
         <View style={styles.centerContainer}>
           <Ionicons name="search-outline" size={64} color="#666" />
-          <Text style={styles.emptyText}>No albums found</Text>
-          <Text style={styles.emptySubtext}>Try different keywords or search by artist</Text>
+          <Text style={styles.emptyText}>No albums or songs found</Text>
+          <Text style={styles.emptySubtext}>Try different keywords</Text>
         </View>
       ) : hasSearched && mode === 'artists' && artistResults.length === 0 ? (
         <View style={styles.centerContainer}>
@@ -188,21 +208,21 @@ export default function SearchScreen({ navigation }: any) {
             {mode === 'artists' ? 'Search for artists' : 'Search for albums'}
           </Text>
           <Text style={styles.emptySubtext}>
-            {mode === 'artists' ? 'See all albums by an artist' : 'Find albums to log and review'}
+            {mode === 'artists' ? 'See all albums by an artist' : 'Find albums and songs to rate'}
           </Text>
         </View>
       ) : mode === 'artists' ? (
         <FlatList
           data={artistResults}
           renderItem={renderArtistResult}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => `artist-${item.id}`}
           contentContainerStyle={styles.resultsList}
         />
       ) : (
         <FlatList
-          data={results}
-          renderItem={renderSearchResult}
-          keyExtractor={(item) => item.id}
+          data={musicResults}
+          renderItem={renderMusicResult}
+          keyExtractor={(item) => `${item.type}-${item.data.id}`}
           contentContainerStyle={styles.resultsList}
         />
       )}
@@ -320,6 +340,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     marginBottom: 2,
+  },
+  albumMeta: {
+    fontSize: 12,
+    color: '#666',
   },
   releaseDate: {
     fontSize: 12,

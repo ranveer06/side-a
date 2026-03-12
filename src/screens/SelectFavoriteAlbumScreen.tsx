@@ -6,15 +6,16 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   TextInput,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { spotifyService } from '../services/spotify';
+import RemoteImage from '../components/RemoteImage';
 
 export default function SelectFavoriteAlbumScreen({ route, navigation }: any) {
-  const { position, usedArtists = [], onSelect } = route.params;
+  const { position, usedArtists = [], onSelect } = route.params ?? {};
   const [searchQuery, setSearchQuery] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -27,7 +28,7 @@ export default function SelectFavoriteAlbumScreen({ route, navigation }: any) {
     setHasSearched(true);
 
     try {
-      const searchResults = await spotifyService.searchAlbums(searchQuery, 20);
+      const searchResults = await spotifyService.searchAlbumsWithKeywords(searchQuery, 50);
       
       // Filter out artists already in favorites
       const filtered = searchResults.filter(
@@ -43,9 +44,7 @@ export default function SelectFavoriteAlbumScreen({ route, navigation }: any) {
   };
 
   const handleSelectAlbum = async (result: any) => {
-    // Cache album in Supabase first
     const album = await spotifyService.getOrCacheAlbum(result.id);
-    
     if (album) {
       onSelect({
         id: album.id,
@@ -54,6 +53,11 @@ export default function SelectFavoriteAlbumScreen({ route, navigation }: any) {
         cover_art_url: album.cover_art_url,
       });
       navigation.goBack();
+    } else {
+      Alert.alert(
+        'Couldn’t add album',
+        'The album couldn’t be loaded. Check your connection and try again.'
+      );
     }
   };
 
@@ -62,13 +66,7 @@ export default function SelectFavoriteAlbumScreen({ route, navigation }: any) {
       style={styles.albumItem}
       onPress={() => handleSelectAlbum(item)}
     >
-      {item.coverArtUrl ? (
-        <Image source={{ uri: item.coverArtUrl }} style={styles.coverImage} />
-      ) : (
-        <View style={styles.coverPlaceholder}>
-          <Ionicons name="disc-outline" size={40} color="#666" />
-        </View>
-      )}
+      <RemoteImage uri={item.coverArtUrl} style={styles.coverImage} />
       <View style={styles.info}>
         <Text style={styles.title} numberOfLines={2}>
           {item.title}

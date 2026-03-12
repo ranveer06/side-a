@@ -6,13 +6,15 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   RefreshControl,
   ActivityIndicator,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, collectionService } from '../services/supabase';
+import { spotifyService } from '../services/spotify';
+import RemoteImage from '../components/RemoteImage';
+import AlbumCover from '../components/AlbumCover';
 
 type Format = 'all' | 'vinyl' | 'cd' | 'tape';
 
@@ -26,6 +28,7 @@ interface CollectionItem {
     title: string;
     artist: string;
     cover_art_url?: string;
+    musicbrainz_id?: string;
   };
 }
 
@@ -50,6 +53,35 @@ export default function CollectionScreen({ navigation }: any) {
       const format = selectedFormat === 'all' ? undefined : selectedFormat;
       const data = await collectionService.getUserCollection(user.id, format);
       setCollection(data || []);
+
+      const rows = data || [];
+      const missingAlbumIds = [
+        ...new Set(
+          rows
+            .filter((row: any) => !row.albums?.cover_art_url || String(row.albums.cover_art_url).trim() === '')
+            .map((row: any) => row.albums?.id)
+            .filter(Boolean)
+        ),
+      ];
+      if (missingAlbumIds.length > 0) {
+        (async () => {
+          for (const albumId of missingAlbumIds) {
+            try {
+              const url = await spotifyService.ensureCoverForAlbum(albumId);
+              if (url) {
+                setCollection((prev) =>
+                  prev.map((item: any) =>
+                    item.albums?.id === albumId
+                      ? { ...item, albums: { ...item.albums, cover_art_url: url } }
+                      : item
+                  )
+                );
+              }
+            } catch (_) {}
+            await new Promise((r) => setTimeout(r, 200));
+          }
+        })();
+      }
     } catch (error) {
       console.error('Error loading collection:', error);
     } finally {
@@ -120,13 +152,13 @@ export default function CollectionScreen({ navigation }: any) {
       onLongPress={() => handleRemoveFromCollection(item.id, item.albums.title)}
     >
       <View style={styles.itemContent}>
-        {item.albums.cover_art_url ? (
-          <Image source={{ uri: item.albums.cover_art_url }} style={styles.cover} />
-        ) : (
-          <View style={styles.coverPlaceholder}>
-            <Ionicons name="disc-outline" size={40} color="#666" />
-          </View>
-        )}
+        <AlbumCover
+          coverArtUrl={item.albums.cover_art_url}
+          albumId={item.albums.id}
+          title={item.albums.title}
+          artist={item.albums.artist}
+          style={styles.cover}
+        />
 
         <View style={styles.itemInfo}>
           <Text style={styles.itemTitle} numberOfLines={1}>

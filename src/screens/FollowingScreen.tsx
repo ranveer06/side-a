@@ -6,13 +6,13 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   RefreshControl,
   ActivityIndicator,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, socialService } from '../services/supabase';
+import RemoteImage from '../components/RemoteImage';
 
 interface FollowUser {
   id: string;
@@ -120,13 +120,7 @@ export default function FollowingScreen({ navigation }: any) {
       onPress={() => navigation.navigate('Profile', { userId: item.id })}
     >
       <View style={styles.userAvatar}>
-        {item.avatar_url ? (
-          <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
-        ) : (
-          <View style={styles.avatarPlaceholder}>
-            <Ionicons name="person" size={30} color="#666" />
-          </View>
-        )}
+        <RemoteImage uri={item.avatar_url} style={styles.avatar} placeholderIcon="person-circle-outline" />
       </View>
       <View style={styles.userInfo}>
         <Text style={styles.username}>@{item.username}</Text>

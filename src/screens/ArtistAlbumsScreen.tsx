@@ -6,14 +6,14 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { spotifyService, type SpotifySearchResult } from '../services/spotify';
+import RemoteImage from '../components/RemoteImage';
 
 export default function ArtistAlbumsScreen({ route, navigation }: any) {
-  const { artistId, artistName } = route.params;
+  const { artistId, artistName } = route.params ?? {};
   const [albums, setAlbums] = useState<SpotifySearchResult[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -26,12 +26,19 @@ export default function ArtistAlbumsScreen({ route, navigation }: any) {
   }, [navigation, artistName]);
 
   useEffect(() => {
+    if (!artistId) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
-      const data = await spotifyService.getArtistAlbums(artistId, 50);
-      if (!cancelled) {
-        setAlbums(data);
-        setLoading(false);
+      try {
+        const data = await spotifyService.getArtistAlbums(artistId, 50);
+        if (!cancelled) setAlbums(data ?? []);
+      } catch (_) {
+        if (!cancelled) setAlbums([]);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -44,13 +51,7 @@ export default function ArtistAlbumsScreen({ route, navigation }: any) {
 
   const renderItem = ({ item }: { item: SpotifySearchResult }) => (
     <TouchableOpacity style={styles.row} onPress={() => handleAlbumPress(item)}>
-      {item.coverArtUrl ? (
-        <Image source={{ uri: item.coverArtUrl }} style={styles.cover} />
-      ) : (
-        <View style={styles.coverPlaceholder}>
-          <Ionicons name="disc-outline" size={40} color="#666" />
-        </View>
-      )}
+      <RemoteImage uri={item.coverArtUrl} style={styles.cover} />
       <View style={styles.info}>
         <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
         {item.date && (
@@ -65,6 +66,17 @@ export default function ArtistAlbumsScreen({ route, navigation }: any) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#1DB954" />
+      </View>
+    );
+  }
+
+  if (!artistId) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.emptyText}>Artist not found</Text>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Text style={styles.backBtnText}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -91,6 +103,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' },
   emptyText: { color: '#999', fontSize: 16 },
+  backBtn: { marginTop: 16, paddingVertical: 12, paddingHorizontal: 24, backgroundColor: '#333', borderRadius: 8 },
+  backBtnText: { color: '#fff', fontWeight: '600', fontSize: 14 },
   list: { paddingBottom: 24 },
   row: {
     flexDirection: 'row',

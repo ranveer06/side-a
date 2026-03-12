@@ -4,15 +4,20 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   Alert,
   Modal,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, albumLogService, collectionService, listenListService } from '../services/supabase';
+import { spotifyService } from '../services/spotify';
+import type { SpotifyTrack } from '../services/spotify';
+import RemoteImage from '../components/RemoteImage';
+import AlbumCover from '../components/AlbumCover';
+import { formatAlbumDescription } from '../utils/albumDescription';
 
 interface Album {
   id: string;
@@ -22,12 +27,13 @@ interface Album {
   release_date?: string;
   cover_art_url?: string;
   total_tracks?: number;
+  genre?: string | null;
 }
 
 type Format = 'vinyl' | 'cd' | 'tape' | 'other';
 
 export default function AlbumDetailScreen({ route, navigation }: any) {
-  const { albumId } = route.params;
+  const albumId = route.params?.albumId;
   const [album, setAlbum] = useState<Album | null>(null);
   const [loading, setLoading] = useState(true);
   const [userLog, setUserLog] = useState<any>(null);
@@ -36,9 +42,13 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
   const [inListenList, setInListenList] = useState(false);
   const [communityLogs, setCommunityLogs] = useState<any[]>([]);
   const [communityReviewsLoading, setCommunityReviewsLoading] = useState(false);
+  const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
+  const [tracksLoading, setTracksLoading] = useState(false);
+  const [criticScore, setCriticScore] = useState<{ score?: number; description?: string; source?: string } | null>(null);
 
   useEffect(() => {
-    loadData();
+    if (albumId) loadData();
+    else setLoading(false);
   }, [albumId]);
 
   // Load community reviews whenever we have an albumId (and on focus)
@@ -124,6 +134,21 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
     });
     return unsubscribe;
   }, [navigation, loading, albumId]);
+
+  useEffect(() => {
+    if (!album?.musicbrainz_id) return;
+    const mbid = String(album.musicbrainz_id);
+    const spotifyId = mbid.startsWith('spotify:') ? mbid.slice(8) : (/^[0-9A-Za-z]{22}$/.test(mbid) ? mbid : null);
+    if (!spotifyId) return;
+    let cancelled = false;
+    setTracksLoading(true);
+    spotifyService.getAlbumTracks(spotifyId).then((list) => {
+      if (!cancelled) {
+        setTracks(list);
+      }
+    }).catch(() => {}).finally(() => { if (!cancelled) setTracksLoading(false); });
+    return () => { cancelled = true; };
+  }, [album?.id, album?.musicbrainz_id]);
 
   const handleDeleteLog = () => {
     if (!userLog) return;
@@ -422,11 +447,14 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
     );
   }
 
-  if (!album) {
+  if (!albumId || !album) {
     return (
       <View style={styles.centerContainer}>
         <Ionicons name="alert-circle-outline" size={64} color="#666" />
         <Text style={styles.errorText}>Album not found</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.backButtonText}>Go back</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -437,16 +465,29 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
     <>
       <ScrollView style={styles.container}>
         <View style={styles.header}>
-          {album.cover_art_url ? (
-            <Image source={{ uri: album.cover_art_url }} style={styles.coverArt} />
-          ) : (
-            <View style={styles.coverPlaceholder}>
-              <Ionicons name="disc-outline" size={100} color="#666" />
-            </View>
-          )}
+          <AlbumCover
+            coverArtUrl={album.cover_art_url}
+            albumId={album.id}
+            title={album.title}
+            artist={album.artist}
+            style={styles.coverArt}
+          />
 
           <Text style={styles.title}>{album.title}</Text>
           <Text style={styles.artist}>{album.artist}</Text>
+          {(() => {
+            const { line, vibe } = formatAlbumDescription({
+              artist: album.artist,
+              release_date: album.release_date,
+              genre: album.genre,
+            });
+            if (!line && !vibe) return null;
+            return (
+              <Text style={styles.albumDescription}>
+                {line}{vibe ? ` · ${vibe}` : ''}
+              </Text>
+            );
+          })()}
 
           <View style={styles.metadata}>
             {album.release_date && (
@@ -457,12 +498,54 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
                 </Text>
               </View>
             )}
-            {album.total_tracks && (
+            {album.total_tracks != null && album.total_tracks > 0 && (
               <View style={styles.metaItem}>
                 <Ionicons name="musical-notes-outline" size={16} color="#999" />
                 <Text style={styles.metaText}>{album.total_tracks} tracks</Text>
               </View>
             )}
+            {(() => {
+              const withRating = communityLogs.filter((l: any) => l.rating != null && Number(l.rating) > 0);
+              const n = withRating.length;
+              if (n === 0) return null;
+              const avg = withRating.reduce((s: number, l: any) => s + Number(l.rating), 0) / n;
+              const avgRounded = Math.round(avg * 10) / 10;
+              return (
+                <View style={styles.metaItem}>
+                  <Ionicons name="star" size={16} color="#FFD700" />
+                  <Text style={styles.metaText}>Community avg: {avgRounded} ({n})</Text>
+                </View>
+              );
+            })()}
+          </View>
+
+          <View style={styles.listenOnRow}>
+            {(() => {
+              const mbid = (album.musicbrainz_id || '').toString();
+              const spotifyId = mbid.startsWith('spotify:') ? mbid.slice(8) : /^[0-9A-Za-z]{22}$/.test(mbid) ? mbid : null;
+              return (
+                <>
+                  {spotifyId ? (
+                    <TouchableOpacity
+                      style={styles.listenOnButton}
+                      onPress={() => Linking.openURL(`https://open.spotify.com/album/${spotifyId}`)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="musical-notes" size={18} color="#1DB954" />
+                      <Text style={styles.listenOnText}>Open in Spotify</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                  <TouchableOpacity
+                    style={styles.listenOnButton}
+                    onPress={() => Linking.openURL(`https://music.apple.com/search?term=${encodeURIComponent(`${album.title} ${album.artist}`)}`)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="play-circle" size={18} color="#FA243C" />
+                    <Text style={styles.listenOnText}>Search on Apple Music</Text>
+                  </TouchableOpacity>
+                </>
+              );
+            })()}
           </View>
 
           {/* Show owned formats */}
@@ -478,6 +561,28 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
               </View>
             </View>
           )}
+        </View>
+
+        {/* Button to open tracklist + rate songs on its own screen */}
+        <View style={styles.tracklistButtonSection}>
+          <TouchableOpacity
+            style={styles.tracklistButton}
+            onPress={() =>
+              navigation.navigate('AlbumTracklist', {
+                albumId,
+                albumTitle: album.title,
+                albumArtist: album.artist,
+                userLogId: userLog?.id ?? null,
+              })
+            }
+            activeOpacity={0.8}
+          >
+            <Ionicons name="list" size={22} color="#1DB954" />
+            <Text style={styles.tracklistButtonText}>
+              {tracksLoading ? 'Loading tracklist…' : tracks.length > 0 ? `View tracklist & rate songs (${tracks.length})` : 'View tracklist & rate songs'}
+            </Text>
+            <Ionicons name="chevron-forward" size={20} color="#666" />
+          </TouchableOpacity>
         </View>
 
         {userLog && (
@@ -599,13 +704,7 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
                   activeOpacity={0.8}
                 >
                   <View style={styles.communityReviewHeader}>
-                    {log.avatar_url ? (
-                      <Image source={{ uri: log.avatar_url }} style={styles.communityReviewAvatar} />
-                    ) : (
-                      <View style={styles.communityReviewAvatarPlaceholder}>
-                        <Ionicons name="person-circle-outline" size={40} color="#666" />
-                      </View>
-                    )}
+                    <RemoteImage uri={log.avatar_url} style={styles.communityReviewAvatar} placeholderIcon="person-circle-outline" />
                     <View style={styles.communityReviewMeta}>
                       <View style={styles.communityReviewTitleRow}>
                         <Text style={styles.communityReviewUsername}>@{log.username}</Text>
@@ -630,6 +729,31 @@ export default function AlbumDetailScreen({ route, navigation }: any) {
             })
           )}
         </View>
+
+        {/* Critic score (Rolling Stone) — shown when album has no/few community ratings */}
+        {(communityLogs.length === 0 || (communityLogs.filter((l: any) => l.rating != null).length === 0)) && (
+          <View style={styles.criticSection}>
+            <Text style={styles.sectionTitle}>Critic score (Rolling Stone)</Text>
+            {criticScore?.score != null && criticScore?.description ? (
+              <View style={styles.criticCard}>
+                <View style={styles.criticScoreRow}>
+                  <Ionicons name="star" size={20} color="#FFD700" />
+                  <Text style={styles.criticScoreText}>{criticScore.score}/5</Text>
+                  {criticScore.source && (
+                    <Text style={styles.criticSource}>{criticScore.source}</Text>
+                  )}
+                </View>
+                <Text style={styles.criticDescription}>{criticScore.description}</Text>
+              </View>
+            ) : (
+              <View style={styles.criticCard}>
+                <Text style={styles.criticPlaceholder}>
+                  No Rolling Stone review on file for this album. Community reviews will appear above once listeners log it.
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
       </ScrollView>
 
       <FormatSelectorModal />
@@ -680,7 +804,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#999',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 4,
+  },
+  albumDescription: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    marginBottom: 12,
   },
   metadata: {
     flexDirection: 'row',
@@ -695,6 +825,49 @@ const styles = StyleSheet.create({
   metaText: {
     fontSize: 14,
     color: '#999',
+  },
+  tracklistButtonSection: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+  },
+  tracklistButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    padding: 16,
+    borderRadius: 12,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  tracklistButtonText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  listenOnRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 16,
+    justifyContent: 'center',
+  },
+  listenOnButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  listenOnText: {
+    fontSize: 14,
+    color: '#fff',
   },
   ownedFormatsContainer: {
     marginTop: 16,
@@ -802,6 +975,140 @@ const styles = StyleSheet.create({
   secondaryButtonTextActive: {
     color: '#1DB954',
   },
+  tracklistSection: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+  },
+  tracklist: {
+    marginTop: 8,
+  },
+  trackRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+    gap: 12,
+  },
+  trackNumber: {
+    fontSize: 14,
+    color: '#666',
+    width: 28,
+    textAlign: 'right',
+  },
+  trackName: {
+    flex: 1,
+    fontSize: 15,
+    color: '#fff',
+  },
+  trackDuration: {
+    fontSize: 13,
+    color: '#666',
+  },
+  rateTracksSection: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+  },
+  rateTracksHint: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  trackRatingsList: {
+    marginTop: 8,
+  },
+  trackRatingCard: {
+    marginBottom: 14,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+  },
+  trackRatingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    gap: 10,
+  },
+  trackRatingNum: {
+    fontSize: 13,
+    color: '#666',
+    width: 24,
+    textAlign: 'right',
+  },
+  trackRatingName: {
+    flex: 1,
+    fontSize: 14,
+    color: '#ddd',
+  },
+  trackRatingStars: {
+    flexDirection: 'row',
+    gap: 2,
+  },
+  trackNoteInput: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 6,
+    padding: 10,
+    color: '#fff',
+    fontSize: 14,
+    minHeight: 44,
+    marginTop: 8,
+    marginLeft: 0,
+    textAlignVertical: 'top',
+  },
+  trackNoteCharCount: {
+    fontSize: 11,
+    color: '#555',
+    marginTop: 4,
+  },
+  rateTracksPlaceholder: {
+    marginTop: 8,
+  },
+  rateTracksPlaceholderText: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+  },
+  criticSection: {
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#222',
+    marginTop: 8,
+  },
+  criticCard: {
+    backgroundColor: '#111',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#222',
+  },
+  criticScoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  criticScoreText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  criticSource: {
+    fontSize: 12,
+    color: '#888',
+  },
+  criticDescription: {
+    fontSize: 14,
+    color: '#bbb',
+    lineHeight: 20,
+  },
+  criticPlaceholder: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+  },
   reviewsSection: {
     padding: 16,
     borderTopWidth: 1,
@@ -891,6 +1198,18 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#999',
     marginTop: 16,
+  },
+  backButton: {
+    marginTop: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    backgroundColor: '#333',
+    borderRadius: 8,
+  },
+  backButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
   },
   modalOverlay: {
     flex: 1,

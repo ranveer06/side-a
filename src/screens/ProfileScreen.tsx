@@ -6,13 +6,15 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Image,
   RefreshControl,
   ActivityIndicator,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase, albumLogService, profileService, authService, socialService, listService, listenListService } from '../services/supabase';
+import { spotifyService } from '../services/spotify';
+import RemoteImage from '../components/RemoteImage';
+import AlbumCover from '../components/AlbumCover';
 
 type ProfileTab = 'Profile' | 'Diary' | 'Lists' | 'ListenList';
 
@@ -39,6 +41,7 @@ export default function ProfileScreen({ route, navigation }: any) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isFollowingViewingUser, setIsFollowingViewingUser] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -75,7 +78,8 @@ export default function ProfileScreen({ route, navigation }: any) {
             id,
             title,
             artist,
-            cover_art_url
+            cover_art_url,
+            musicbrainz_id
           )
         `)
         .eq('user_id', profileUserId)
@@ -134,6 +138,58 @@ export default function ProfileScreen({ route, navigation }: any) {
         .limit(6);
 
       setCollection(collectionData || []);
+
+      // Backfill missing album covers (same stuck rows as feed/collection)
+      const idsToFix = new Set<string>();
+      (favoritesData || []).forEach((f: any) => {
+        const a = f.albums;
+        if (a?.id && (!a.cover_art_url || !String(a.cover_art_url).trim())) idsToFix.add(a.id);
+      });
+      (logsData || []).forEach((log: any) => {
+        const a = log.albums;
+        if (a?.id && (!a.cover_art_url || !String(a.cover_art_url).trim())) idsToFix.add(a.id);
+        else if (log.album_id) idsToFix.add(log.album_id);
+      });
+      (collectionData || []).forEach((row: any) => {
+        const a = row.albums;
+        if (a?.id && (!a.cover_art_url || !String(a.cover_art_url).trim())) idsToFix.add(a.id);
+      });
+      if (idsToFix.size > 0) {
+        (async () => {
+          for (const albumId of idsToFix) {
+            try {
+              const url = await spotifyService.ensureCoverForAlbum(albumId);
+              if (url) {
+                setFavorites((prev: any[]) =>
+                  prev.map((f) =>
+                    f.albums?.id === albumId ? { ...f, albums: { ...f.albums, cover_art_url: url } } : f
+                  )
+                );
+                setLogs((prev: any[]) =>
+                  prev.map((log) =>
+                    log.album_id === albumId || log.albums?.id === albumId
+                      ? {
+                          ...log,
+                          albums: log.albums
+                            ? { ...log.albums, cover_art_url: url }
+                            : log.albums,
+                        }
+                      : log
+                  )
+                );
+                setCollection((prev: any[]) =>
+                  prev.map((row) =>
+                    row.albums?.id === albumId
+                      ? { ...row, albums: { ...row.albums, cover_art_url: url } }
+                      : row
+                  )
+                );
+              }
+            } catch (_) {}
+            await new Promise((r) => setTimeout(r, 200));
+          }
+        })();
+      }
 
       setStats({
         totalLogs,
@@ -237,16 +293,13 @@ export default function ProfileScreen({ route, navigation }: any) {
       <View style={styles.favoriteNumber}>
         <Text style={styles.favoriteNumberText}>{favorite.position}</Text>
       </View>
-      {favorite.albums?.cover_art_url ? (
-        <Image
-          source={{ uri: favorite.albums.cover_art_url }}
-          style={styles.favoriteCover}
-        />
-      ) : (
-        <View style={styles.favoriteCoverPlaceholder}>
-          <Ionicons name="disc-outline" size={30} color="#666" />
-        </View>
-      )}
+      <AlbumCover
+        coverArtUrl={favorite.albums?.cover_art_url}
+        albumId={favorite.albums?.id}
+        title={favorite.albums?.title}
+        artist={favorite.albums?.artist}
+        style={styles.favoriteCover}
+      />
       <View style={styles.favoriteInfo}>
         <Text style={styles.favoriteTitle} numberOfLines={1}>
           {favorite.albums?.title || 'Unknown'}
@@ -264,13 +317,13 @@ export default function ProfileScreen({ route, navigation }: any) {
       style={styles.logItem}
       onPress={() => navigation.navigate('AlbumDetail', { albumId: log.album_id })}
     >
-      {log.albums?.cover_art_url ? (
-        <Image source={{ uri: log.albums.cover_art_url }} style={styles.logCover} />
-      ) : (
-        <View style={styles.logCoverPlaceholder}>
-          <Ionicons name="disc-outline" size={24} color="#666" />
-        </View>
-      )}
+      <AlbumCover
+        coverArtUrl={log.albums?.cover_art_url}
+        albumId={log.albums?.id ?? log.album_id}
+        title={log.albums?.title}
+        artist={log.albums?.artist}
+        style={styles.logCover}
+      />
       <View style={styles.logInfo}>
         <Text style={styles.logTitle} numberOfLines={1}>
           {log.albums?.title || 'Unknown Album'}
@@ -315,13 +368,7 @@ export default function ProfileScreen({ route, navigation }: any) {
       {/* Profile Info */}
       <View style={styles.profileSection}>
         <View style={styles.avatarContainer}>
-          {profile?.avatar_url ? (
-            <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
-          ) : (
-            <View style={styles.avatarPlaceholder}>
-              <Ionicons name="person" size={50} color="#666" />
-            </View>
-          )}
+          <RemoteImage uri={profile?.avatar_url} style={styles.avatar} placeholderIcon="person-circle-outline" />
         </View>
         
         <Text style={styles.username}>
@@ -341,7 +388,8 @@ export default function ProfileScreen({ route, navigation }: any) {
           <TouchableOpacity
             style={[styles.followProfileButton, isFollowingViewingUser && styles.followProfileButtonFollowing]}
             onPress={async () => {
-              if (!viewingUserId) return;
+              if (!viewingUserId || followBusy) return;
+              setFollowBusy(true);
               try {
                 if (isFollowingViewingUser) {
                   await socialService.unfollowUser(viewingUserId);
@@ -351,12 +399,16 @@ export default function ProfileScreen({ route, navigation }: any) {
                   setIsFollowingViewingUser(true);
                 }
               } catch (e: any) {
-                Alert.alert('Error', e.message || 'Could not update follow');
+                const msg = e?.message || e?.error_description || 'Could not update follow';
+                Alert.alert('Error', msg);
+              } finally {
+                setFollowBusy(false);
               }
             }}
+            disabled={followBusy}
           >
             <Text style={[styles.followProfileButtonText, isFollowingViewingUser && styles.followProfileButtonTextFollowing]}>
-              {isFollowingViewingUser ? 'Following' : 'Follow'}
+              {followBusy ? '…' : isFollowingViewingUser ? 'Following' : 'Follow'}
             </Text>
           </TouchableOpacity>
         )}
@@ -499,16 +551,13 @@ export default function ProfileScreen({ route, navigation }: any) {
                 style={styles.collectionItem}
                 onPress={() => navigation.navigate('AlbumDetail', { albumId: item.album_id })}
               >
-                {item.albums?.cover_art_url ? (
-                  <Image
-                    source={{ uri: item.albums.cover_art_url }}
-                    style={styles.collectionCover}
-                  />
-                ) : (
-                  <View style={styles.collectionCoverPlaceholder}>
-                    <Ionicons name="disc-outline" size={30} color="#666" />
-                  </View>
-                )}
+                <AlbumCover
+                  coverArtUrl={item.albums?.cover_art_url}
+                  albumId={item.albums?.id}
+                  title={item.albums?.title}
+                  artist={item.albums?.artist}
+                  style={styles.collectionCover}
+                />
                 <View style={styles.formatIndicator}>
                   <Ionicons
                     name={
@@ -589,13 +638,13 @@ export default function ProfileScreen({ route, navigation }: any) {
                   style={styles.diaryItem}
                   onPress={() => navigation.navigate('LogDetail', { logId: log.id })}
                 >
-                  {log.albums?.cover_art_url ? (
-                    <Image source={{ uri: log.albums.cover_art_url }} style={styles.logCover} />
-                  ) : (
-                    <View style={styles.logCoverPlaceholder}>
-                      <Ionicons name="disc-outline" size={24} color="#666" />
-                    </View>
-                  )}
+                  <AlbumCover
+        coverArtUrl={log.albums?.cover_art_url}
+        albumId={log.albums?.id ?? log.album_id}
+        title={log.albums?.title}
+        artist={log.albums?.artist}
+        style={styles.logCover}
+      />
                   <View style={styles.logInfo}>
                     <View style={styles.diaryTitleRow}>
                       <Text style={styles.logTitle} numberOfLines={1}>{log.albums?.title || 'Unknown'}</Text>
@@ -692,13 +741,13 @@ export default function ProfileScreen({ route, navigation }: any) {
                 style={styles.diaryItem}
                 onPress={() => navigation.navigate('AlbumDetail', { albumId: item.album_id })}
               >
-                {item.albums?.cover_art_url ? (
-                  <Image source={{ uri: item.albums.cover_art_url }} style={styles.logCover} />
-                ) : (
-                  <View style={styles.logCoverPlaceholder}>
-                    <Ionicons name="disc-outline" size={24} color="#666" />
-                  </View>
-                )}
+                <AlbumCover
+                  coverArtUrl={item.albums?.cover_art_url}
+                  albumId={item.albums?.id}
+                  title={item.albums?.title}
+                  artist={item.albums?.artist}
+                  style={styles.logCover}
+                />
                 <View style={styles.logInfo}>
                   <Text style={styles.logTitle} numberOfLines={1}>{item.albums?.title || 'Unknown'}</Text>
                   <Text style={styles.logArtist} numberOfLines={1}>{item.albums?.artist || 'Unknown'}</Text>
@@ -755,13 +804,13 @@ export default function ProfileScreen({ route, navigation }: any) {
                     style={styles.collectionItem}
                     onPress={() => navigation.navigate('AlbumDetail', { albumId: item.album_id })}
                   >
-                    {item.albums?.cover_art_url ? (
-                      <Image source={{ uri: item.albums.cover_art_url }} style={styles.collectionCover} />
-                    ) : (
-                      <View style={styles.collectionCoverPlaceholder}>
-                        <Ionicons name="disc-outline" size={30} color="#666" />
-                      </View>
-                    )}
+                    <AlbumCover
+                  coverArtUrl={item.albums?.cover_art_url}
+                  albumId={item.albums?.id}
+                  title={item.albums?.title}
+                  artist={item.albums?.artist}
+                  style={styles.collectionCover}
+                />
                   </TouchableOpacity>
                 ))}
               </View>
