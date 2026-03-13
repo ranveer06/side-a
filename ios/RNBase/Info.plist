@@ -4,6 +4,10 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<key>CFBundleIconFiles</key>
+	<array>
+		<string>Icon-120</string>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>Side A</string>
 	<key>CFBundleExecutable</key>
