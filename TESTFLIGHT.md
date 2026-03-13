@@ -4,7 +4,7 @@
 
 - **Apple Developer account** (paid, $99/year) — [developer.apple.com](https://developer.apple.com)
 - **App in App Store Connect** with the same **Bundle ID** as your Xcode project (`com.ronny.sidea`)
-- **Xcode 16 or later** — As of April 2025, Apple requires builds to be made with **Xcode 16+** and the iOS 18 SDK. Older Xcode versions will get “Unsupported SDK and Xcode version”. Install from the Mac App Store or [developer.apple.com](https://developer.apple.com/xcode/).
+- **Latest stable (non-beta) Xcode** — Builds made with **beta** Xcode (e.g. Xcode 26 beta) are **rejected** by App Store Connect with “Unsupported SDK and Xcode version”. You must use the **current GA (stable) Xcode** from the Mac App Store or [developer.apple.com](https://developer.apple.com/xcode/) (e.g. Xcode 16.x). Switch to it: **Xcode** → **Settings** → **Locations** → **Command Line Tools** → choose the stable Xcode, then archive again.
 
 ## 1. Set bundle ID and signing in Xcode
 
@@ -63,7 +63,7 @@
 
 ## Troubleshooting
 
-- **“Unsupported SDK and Xcode version”** — Build with **Xcode 16 or later** (required as of April 2025). Select Xcode 16 in the command line: `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` (path may differ if you have multiple Xcodes).
+- **“Unsupported SDK and Xcode version”** — **Do not use beta Xcode** for uploads. App Store Connect rejects builds from Xcode beta. Use the **latest stable Xcode** (e.g. Xcode 16.x from the Mac App Store). If you have both: `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` (point to the stable app, not Xcode-beta).
 - **“Redundant binary upload”** — The same version + build number is already on App Store Connect. Increment the **Build** number (e.g. 2 → 3) in Xcode → RNBase target → General, then archive and upload again.
 - **“Missing icon file”** — Ensure `ios/RNBase/Images.xcassets/AppIcon.appiconset/AppIcon-1024.png` exists and is a 1024×1024 PNG. Replace the placeholder with your real app icon.
 - **“Missing Info.plist value”** — Add or fix the required key (e.g. usage description strings must be non-empty). The project sets `NSPhotoLibraryUsageDescription` and `NSLocationWhenInUseUsageDescription`.
